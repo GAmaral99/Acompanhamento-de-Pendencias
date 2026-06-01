@@ -44,7 +44,7 @@ git init
 git add .
 git commit -m "setup inicial"
 git branch -M main
-git remote add origin https://github.com/SEU_USUARIO/relatorio-pendencias.git
+git remote add origin https://github.com/GAmaral99/Acompanhamento-de-Pendencias
 git push -u origin main
 ```
 
