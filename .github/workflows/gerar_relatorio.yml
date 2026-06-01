@@ -1,0 +1,69 @@
+name: Gerar Relatório de Pendências
+
+on:
+  push:
+    paths:
+      - 'data/**.xlsx'   # dispara quando qualquer .xlsx na pasta data/ for alterado
+
+  workflow_dispatch:     # permite rodar manualmente pelo GitHub
+
+permissions:
+  contents: write        # necessário para commitar o index.html gerado
+  pages: write
+  id-token: write
+
+jobs:
+  gerar:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # histórico completo (necessário para achar 1º arquivo da semana)
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar dependências
+        run: pip install pandas openpyxl
+
+      - name: Encontrar arquivos Excel e gerar relatório
+        run: |
+          python scripts/encontrar_e_gerar.py
+
+      - name: Commitar index.html gerado
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add index.html
+          # só commita se houve mudança
+          git diff --staged --quiet || git commit -m "chore: atualiza relatório [skip ci]"
+          git push
+
+  publicar:
+    needs: gerar
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main               # garante que pega o commit mais recente (após o push acima)
+
+      - name: Configurar GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artefato
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'               # publica tudo na raiz (inclui index.html)
+
+      - name: Deploy
+        id: deploy
+        uses: actions/deploy-pages@v4
