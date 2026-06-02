@@ -4,11 +4,13 @@ encontrar_e_gerar.py
 --------------------
 Executado pela GitHub Action. Responsável por:
   1. Listar todos os .xlsx na pasta data/
-  2. Ordenar por data de modificação (nome do arquivo contém timestamp)
-  3. Selecionar:
-       - BASE    = primeiro arquivo da semana atual (segunda-feira)
-       - ATUAL   = arquivo mais recente
-  4. Chamar gerar_relatorio.py para produzir o index.html
+  2. Ordenar por data/hora extraída do nome (ou mtime)
+  3. Identificar arquivos de referência:
+       - ATUAL      = arquivo mais recente
+       - BASE_DIA   = primeiro arquivo do mesmo dia calendário que ATUAL
+       - BASE_SEM   = primeiro arquivo da semana (segunda-feira) que contém ATUAL
+       - BASE_MES   = primeiro arquivo do mês calendário que contém ATUAL
+  4. Chamar gerar_relatorio.py com todos os parâmetros
 """
 
 import os
@@ -18,25 +20,16 @@ import subprocess
 from datetime import datetime, date, timedelta
 from pathlib import Path
 
-DATA_DIR   = Path("data")
-OUTPUT     = Path("index.html")
-SCRIPT     = Path("scripts/gerar_relatorio.py")
+DATA_DIR = Path("data")
+OUTPUT   = Path("index.html")
+SCRIPT   = Path("scripts/gerar_relatorio.py")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def segunda_da_semana(d: date) -> date:
-    """Retorna a segunda-feira da semana que contém d."""
     return d - timedelta(days=d.weekday())
 
 def extrair_dt_do_nome(nome: str) -> datetime | None:
-    """
-    Tenta extrair um datetime do nome do arquivo.
-    Aceita padrões comuns:
-      01-06-26_1009   →  01/06/2026 10:09
-      2026-06-01      →  01/06/2026 00:00
-      01-06-2026_1009 →  01/06/2026 10:09
-    Caso não encontre, retorna None.
-    """
     padroes = [
         r'(\d{2})-(\d{2})-(\d{2})_(\d{4})',   # DD-MM-YY_HHMM
         r'(\d{4})-(\d{2})-(\d{2})_(\d{4})',   # YYYY-MM-DD_HHMM
@@ -50,19 +43,19 @@ def extrair_dt_do_nome(nome: str) -> datetime | None:
             g = m.groups()
             try:
                 if len(g) == 4:
-                    if len(g[2]) == 2:                              # DD-MM-YY_HHMM
+                    if len(g[2]) == 2:
                         return datetime(2000+int(g[2]), int(g[1]), int(g[0]),
                                         int(g[3][:2]), int(g[3][2:]))
-                    elif len(g[0]) == 4:                            # YYYY-MM-DD_HHMM
+                    elif len(g[0]) == 4:
                         return datetime(int(g[0]), int(g[1]), int(g[2]),
                                         int(g[3][:2]), int(g[3][2:]))
-                    else:                                           # DD-MM-YYYY_HHMM
+                    else:
                         return datetime(int(g[2]), int(g[1]), int(g[0]),
                                         int(g[3][:2]), int(g[3][2:]))
                 elif len(g) == 3:
-                    if len(g[2]) == 2:                              # DD-MM-YY
+                    if len(g[2]) == 2:
                         return datetime(2000+int(g[2]), int(g[1]), int(g[0]))
-                    elif len(g[0]) == 4:                            # YYYY-MM-DD
+                    elif len(g[0]) == 4:
                         return datetime(int(g[0]), int(g[1]), int(g[2]))
             except ValueError:
                 continue
@@ -78,11 +71,18 @@ def ordenar_arquivos(arquivos: list[Path]) -> list[tuple[datetime, Path]]:
         resultado.append((dt, arq))
     return sorted(resultado, key=lambda x: x[0])
 
+def primeiro_da_condicao(ordenados, condicao):
+    """Retorna (dt, path) do primeiro arquivo que satisfaz a condição, ou None."""
+    for dt, arq in ordenados:
+        if condicao(dt):
+            return dt, arq
+    return None
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
     if not DATA_DIR.exists():
-        print(f"[!] Pasta '{DATA_DIR}' não encontrada. Crie-a e adicione os arquivos Excel.")
+        print(f"[!] Pasta '{DATA_DIR}' não encontrada.")
         sys.exit(1)
 
     arquivos = list(DATA_DIR.glob("*.xlsx"))
@@ -96,27 +96,39 @@ def main():
     for dt, arq in ordenados:
         print(f"    {dt.strftime('%d/%m/%Y %H:%M')}  →  {arq.name}")
 
-    # Arquivo mais recente = ATUAL
+    # ATUAL = mais recente
     dt_atual, arq_atual = ordenados[-1]
+    d_atual = dt_atual.date()
 
-    # Primeiro arquivo da mesma semana (seg a dom) = BASE
-    segunda = segunda_da_semana(dt_atual.date())
-    da_semana = [(dt, arq) for dt, arq in ordenados if dt.date() >= segunda]
+    # BASE_DIA  = primeiro arquivo do mesmo dia
+    res_dia = primeiro_da_condicao(ordenados, lambda dt: dt.date() == d_atual)
+    dt_dia, arq_dia = res_dia if res_dia else (dt_atual, arq_atual)
 
-    if da_semana:
-        dt_base, arq_base = da_semana[0]
-    else:
-        # fallback: usa o mais antigo disponível
-        dt_base, arq_base = ordenados[0]
+    # BASE_SEM  = primeiro arquivo a partir da segunda-feira da semana atual
+    segunda = segunda_da_semana(d_atual)
+    res_sem = primeiro_da_condicao(ordenados, lambda dt: dt.date() >= segunda)
+    dt_sem, arq_sem = res_sem if res_sem else (dt_atual, arq_atual)
 
-    print(f"\n[*] BASE  : {arq_base.name}  ({dt_base.strftime('%d/%m/%Y %H:%M')})")
-    print(f"[*] ATUAL : {arq_atual.name}  ({dt_atual.strftime('%d/%m/%Y %H:%M')})")
+    # BASE_MES  = primeiro arquivo do mês atual
+    res_mes = primeiro_da_condicao(
+        ordenados, lambda dt: dt.year == d_atual.year and dt.month == d_atual.month
+    )
+    dt_mes, arq_mes = res_mes if res_mes else (dt_atual, arq_atual)
 
-    if arq_base == arq_atual:
-        print("[*] Apenas um arquivo na semana — modo visualização única.")
-        cmd = [sys.executable, str(SCRIPT), str(arq_base), "-o", str(OUTPUT)]
-    else:
-        cmd = [sys.executable, str(SCRIPT), str(arq_base), str(arq_atual), "-o", str(OUTPUT)]
+    print(f"\n[*] ATUAL    : {arq_atual.name}  ({dt_atual.strftime('%d/%m/%Y %H:%M')})")
+    print(f"[*] BASE DIA : {arq_dia.name}   ({dt_dia.strftime('%d/%m/%Y %H:%M')})")
+    print(f"[*] BASE SEM : {arq_sem.name}   ({dt_sem.strftime('%d/%m/%Y %H:%M')})")
+    print(f"[*] BASE MÊS : {arq_mes.name}   ({dt_mes.strftime('%d/%m/%Y %H:%M')})")
+
+    cmd = [
+        sys.executable, str(SCRIPT),
+        str(arq_mes),    # base principal (mês) — mantém compatibilidade
+        str(arq_atual),
+        "--base-dia", str(arq_dia),
+        "--base-sem", str(arq_sem),
+        "--base-mes", str(arq_mes),
+        "-o", str(OUTPUT),
+    ]
 
     print(f"\n[*] Executando: {' '.join(cmd)}\n")
     result = subprocess.run(cmd)

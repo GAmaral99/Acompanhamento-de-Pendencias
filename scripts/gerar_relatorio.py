@@ -92,7 +92,39 @@ def df_to_js(df):
                      "dataComt": r["DataComt"], "comt": r["Comentario"]})
     return json.dumps(rows, ensure_ascii=False)
 
-def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionadas):
+def calcular_placares(df_atual, df_dia=None, df_sem=None, df_mes=None):
+    """
+    Retorna dict com baixas (chaves que saíram) por período e por departamento/unidade.
+    Estrutura: { "dia": { "total": N, "por_dep": [{"dep":..,"unidade":..,"n":..}, ...] }, ... }
+    """
+    def baixas_entre(df_base, df_ref):
+        if df_base is None or df_ref is None:
+            return pd.DataFrame()
+        cb = set(df_base["chave"])
+        cr = set(df_ref["chave"])
+        return df_base[df_base["chave"].isin(cb - cr)].copy()
+
+    resultado = {}
+    for periodo, df_b in [("dia", df_dia), ("sem", df_sem), ("mes", df_mes)]:
+        baixas = baixas_entre(df_b, df_atual)
+        if baixas.empty:
+            resultado[periodo] = {"total": 0, "por_dep": []}
+        else:
+            agg = (baixas.groupby(["Unidade", "Departamento"])
+                         .size()
+                         .reset_index(name="n")
+                         .sort_values(["Unidade", "n"], ascending=[True, False]))
+            resultado[periodo] = {
+                "total": int(baixas.shape[0]),
+                "por_dep": [
+                    {"unidade": r["Unidade"], "dep": r["Departamento"], "n": int(r["n"])}
+                    for _, r in agg.iterrows()
+                ]
+            }
+    return resultado
+
+def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionadas,
+               placares=None):
     nome_base  = os.path.basename(arquivo_base)
     nome_atual = os.path.basename(arquivo_atual) if arquivo_atual else nome_base
     gerado_em  = datetime.now().strftime("%d/%m/%Y às %H:%M")
@@ -105,6 +137,8 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionad
     total_fin = len(finalizadas)
     total_add = len(adicionadas)
 
+    js_placares = json.dumps(placares or {}, ensure_ascii=False)
+
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -114,6 +148,7 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionad
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
 :root{{
   --bg:#0a0a0a;--surface:#111111;--surface2:#181818;--border:#2a2a2a;
@@ -270,6 +305,47 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 .no-data{{color:var(--muted);font-size:13px;padding:24px 16px;text-align:center;font-style:italic}}
 .resp-name{{font-size:12px;font-weight:600}}
 
+/* ── PLACARES DE BAIXAS ── */
+.placares-section{{margin:32px 0 28px}}
+.placares-title{{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:10px}}
+.placares-title::after{{content:'';flex:1;height:1px;background:var(--border)}}
+.placares-export-row{{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap}}
+.placar-export-btn{{display:inline-flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--font);font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:7px 14px;border-radius:7px;cursor:pointer;transition:all .18s}}
+.placar-export-btn:hover{{border-color:var(--green);color:var(--green)}}
+.placares-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}}
+.placar-card{{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px 22px;position:relative;overflow:hidden}}
+.placar-card::after{{content:'';position:absolute;bottom:0;left:0;right:0;height:3px}}
+.placar-card.pc-dia::after{{background:var(--red)}}
+.placar-card.pc-sem::after{{background:var(--amber)}}
+.placar-card.pc-mes::after{{background:var(--green)}}
+.pc-label{{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}}
+.pc-num{{font-size:42px;font-weight:800;letter-spacing:-.03em;line-height:1}}
+.placar-card.pc-dia .pc-num{{color:var(--red)}}
+.placar-card.pc-sem .pc-num{{color:var(--amber)}}
+.placar-card.pc-mes .pc-num{{color:var(--green)}}
+.pc-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
+.pc-deps{{margin-top:14px;border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:6px;max-height:220px;overflow-y:auto}}
+.pc-deps::-webkit-scrollbar{{width:3px}}
+.pc-deps::-webkit-scrollbar-thumb{{background:var(--border);border-radius:3px}}
+.pc-dep-row{{display:flex;align-items:center;justify-content:space-between;gap:8px}}
+.pc-dep-name{{font-size:11px;color:var(--off-white);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.pc-dep-unit{{font-size:10px;color:var(--muted);font-family:var(--mono);flex-shrink:0}}
+.pc-dep-n{{font-size:12px;font-weight:700;flex-shrink:0;min-width:24px;text-align:right}}
+.placar-card.pc-dia .pc-dep-n{{color:var(--red)}}
+.placar-card.pc-sem .pc-dep-n{{color:var(--amber)}}
+.placar-card.pc-mes .pc-dep-n{{color:var(--green)}}
+.pc-bar-wrap{{margin-top:3px}}
+.pc-bar{{height:3px;border-radius:2px;transition:width .3s}}
+.placar-card.pc-dia .pc-bar{{background:var(--red)}}
+.placar-card.pc-sem .pc-bar{{background:var(--amber)}}
+.placar-card.pc-mes .pc-bar{{background:var(--green)}}
+.pc-empty{{font-size:12px;color:var(--muted);font-style:italic;padding:8px 0}}
+
+/* capture overlay */
+.capture-overlay{{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}}
+.capture-spinner{{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+
 @media(max-width:700px){{
   .filial-grid{{grid-template-columns:1fr}}
   #screen-dep,.results-body,.results-header{{padding:20px}}
@@ -347,6 +423,38 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
       </div>
     </div>
 
+    <!-- Placares de Baixas -->
+    <div class="placares-section" id="placares-section" style="display:none">
+      <div class="placares-title">Placar de Baixas</div>
+      <div class="placares-export-row">
+        <button class="placar-export-btn" onclick="exportarPlacares('geral')">⬇ Baixar imagem geral</button>
+        <button class="placar-export-btn" onclick="exportarPlacares('dep')">⬇ Baixar por departamento</button>
+      </div>
+      <div class="placares-grid" id="placares-grid">
+        <!-- dia -->
+        <div class="placar-card pc-dia" id="pc-dia">
+          <div class="pc-label">Baixas no Dia</div>
+          <div class="pc-num" id="pc-dia-num">0</div>
+          <div class="pc-sub">tarefas concluídas hoje</div>
+          <div class="pc-deps" id="pc-dia-deps"></div>
+        </div>
+        <!-- semana -->
+        <div class="placar-card pc-sem" id="pc-sem">
+          <div class="pc-label">Baixas na Semana</div>
+          <div class="pc-num" id="pc-sem-num">0</div>
+          <div class="pc-sub">desde segunda-feira</div>
+          <div class="pc-deps" id="pc-sem-deps"></div>
+        </div>
+        <!-- mês -->
+        <div class="placar-card pc-mes" id="pc-mes">
+          <div class="pc-label">Baixas no Mês</div>
+          <div class="pc-num" id="pc-mes-num">0</div>
+          <div class="pc-sub">acumulado do mês</div>
+          <div class="pc-deps" id="pc-mes-deps"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Charts -->
     <div class="charts-section" id="charts-section">
       <div class="charts-title">Evolução por Departamento</div>
@@ -380,6 +488,7 @@ const MODO_COMP = {'true' if modo_comp else 'false'};
 const ARQ_BASE = {json.dumps(nome_base)};
 const ARQ_ATUAL = {json.dumps(nome_atual)};
 const GERADO = {json.dumps(gerado_em)};
+const PLACARES = {js_placares};
 
 let filialAtual=null, depAtual=null, grupoAtual=null, abaAtual='man';
 let chartMan=null, chartComp=null;
@@ -460,6 +569,7 @@ function selecionarDep(dep){{
   buildDropdown();
   renderAll();
   renderCharts();
+  renderPlacares(filialAtual, dep);
   showScreen('screen-results');
 }}
 
@@ -656,6 +766,129 @@ function renderCharts(){{
   }}
 }}
 
+// ── Placares de Baixas ───────────────────────────────────────────────────────
+function renderPlacares(filial, dep){{
+  const sec = document.getElementById('placares-section');
+  const periodos = ['dia','sem','mes'];
+  const temDados = periodos.some(p => PLACARES[p] && PLACARES[p].total > 0);
+  if(!PLACARES || Object.keys(PLACARES).length === 0){{ sec.style.display='none'; return; }}
+  sec.style.display = 'block';
+
+  periodos.forEach(p => {{
+    const pd = PLACARES[p] || {{total:0, por_dep:[]}};
+    // filtra pelo dep/filial atual
+    const filtrados = pd.por_dep.filter(r => r.unidade === filial && r.dep === dep);
+    const total_dep = filtrados.reduce((a,b)=>a+b.n, 0);
+    document.getElementById(`pc-${{p}}-num`).textContent = total_dep;
+
+    const container = document.getElementById(`pc-${{p}}-deps`);
+    if(!filtrados.length){{
+      container.innerHTML = '<div class="pc-empty">Nenhuma baixa neste departamento</div>';
+      return;
+    }}
+    const max_n = Math.max(...filtrados.map(r=>r.n), 1);
+    container.innerHTML = filtrados.map(r => {{
+      const pct = Math.round(r.n / max_n * 100);
+      return `<div class="pc-dep-row">
+        <span class="pc-dep-name" title="${{r.dep}}">${{r.dep}}</span>
+        <span class="pc-dep-n">${{r.n}}</span>
+      </div>
+      <div class="pc-bar-wrap"><div class="pc-bar" style="width:${{pct}}%"></div></div>`;
+    }}).join('');
+  }});
+}}
+
+// ── Export Placares ───────────────────────────────────────────────────────────
+async function exportarPlacares(modo){{
+  // Mostrar overlay
+  const overlay = document.createElement('div');
+  overlay.className = 'capture-overlay';
+  overlay.innerHTML = '<div class="capture-spinner"></div><span style="color:#aaa;font-size:13px">Gerando imagem...</span>';
+  document.body.appendChild(overlay);
+
+  await new Promise(r=>setTimeout(r, 100));
+
+  try {{
+    if(modo === 'geral'){{
+      // Captura o bloco completo dos 3 placares
+      const el = document.getElementById('placares-grid');
+      const canvas = await html2canvas(el, {{
+        backgroundColor: '#111111',
+        scale: 2,
+        useCORS: true,
+        logging: false,
+      }});
+      _downloadCanvas(canvas, `placares_geral_${{depAtual || 'todos'}}.png`);
+    }} else {{
+      // Captura por departamento: gera uma imagem por período com detalhe
+      const periodos = [
+        {{id:'pc-dia', label:'Baixas no Dia'}},
+        {{id:'pc-sem', label:'Baixas na Semana'}},
+        {{id:'pc-mes', label:'Baixas no Mês'}},
+      ];
+
+      // Criar canvas composto manualmente para ter cabeçalho
+      const tmpCanvas = document.createElement('canvas');
+      const cards = periodos.map(p => document.getElementById(p.id));
+
+      // Captura cada card
+      const capturas = await Promise.all(
+        cards.map(card => html2canvas(card, {{
+          backgroundColor: '#111111',
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        }}))
+      );
+
+      // Monta canvas final lado a lado com margem e cabeçalho
+      const pad = 24;
+      const headerH = 60;
+      const totalW = capturas.reduce((a,c)=>a+c.width,0) + pad*(capturas.length+1);
+      const maxH = Math.max(...capturas.map(c=>c.height));
+      const totalH = maxH + pad*2 + headerH;
+
+      tmpCanvas.width = totalW;
+      tmpCanvas.height = totalH;
+      const ctx = tmpCanvas.getContext('2d');
+
+      // Fundo
+      ctx.fillStyle = '#0a0a0a';
+      ctx.fillRect(0,0,totalW,totalH);
+
+      // Cabeçalho
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 28px Inter, sans-serif';
+      ctx.fillText('MG Contécnica · Placar de Baixas', pad, 38);
+      ctx.fillStyle = '#666';
+      ctx.font = '20px Inter, sans-serif';
+      const subtitle = `${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{GERADO}}`;
+      ctx.fillText(subtitle, pad, 62);
+
+      // Cards
+      let x = pad;
+      capturas.forEach(c => {{
+        ctx.drawImage(c, x, headerH + pad);
+        x += c.width + pad;
+      }});
+
+      _downloadCanvas(tmpCanvas, `placares_dep_${{depAtual || 'todos'}}.png`);
+    }}
+  }} catch(e){{
+    console.error('Erro ao exportar:', e);
+    alert('Erro ao gerar imagem. Verifique o console.');
+  }} finally {{
+    document.body.removeChild(overlay);
+  }}
+}}
+
+function _downloadCanvas(canvas, filename){{
+  const link = document.createElement('a');
+  link.download = filename;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 buildFiliais();
 </script>
@@ -667,6 +900,12 @@ def main():
     parser.add_argument("base")
     parser.add_argument("atual", nargs="?", default=None)
     parser.add_argument("-o","--output", default=None)
+    parser.add_argument("--base-dia", default=None, dest="base_dia",
+                        help="Primeiro arquivo do mesmo dia (para placar diário)")
+    parser.add_argument("--base-sem", default=None, dest="base_sem",
+                        help="Primeiro arquivo da semana (para placar semanal)")
+    parser.add_argument("--base-mes", default=None, dest="base_mes",
+                        help="Primeiro arquivo do mês (para placar mensal)")
     args = parser.parse_args()
 
     print(f"[*] Lendo base: {args.base}")
@@ -679,13 +918,35 @@ def main():
         print(f"    {len(df_atual)} tarefas.")
         em_andamento, finalizadas, adicionadas = comparar(df_base, df_atual)
     else:
+        df_atual     = df_base
         em_andamento = df_base.copy()
         finalizadas  = pd.DataFrame(columns=df_base.columns)
         adicionadas  = pd.DataFrame(columns=df_base.columns)
         args.atual   = args.base
 
     print(f"[*] Man:{len(em_andamento)} Fin:{len(finalizadas)} Add:{len(adicionadas)}")
-    html = gerar_html(args.base, args.atual, em_andamento, finalizadas, adicionadas)
+
+    # ── Calcular placares ────────────────────────────────────────────────
+    def ler_ou_none(caminho):
+        if not caminho:
+            return None
+        try:
+            df = ler_relatorio(caminho)
+            print(f"[*] Placar base '{os.path.basename(caminho)}': {len(df)} tarefas.")
+            return df
+        except Exception as e:
+            print(f"[!] Não foi possível ler '{caminho}' para placar: {e}")
+            return None
+
+    df_b_dia = ler_ou_none(args.base_dia)
+    df_b_sem = ler_ou_none(args.base_sem)
+    df_b_mes = ler_ou_none(args.base_mes)
+
+    placares = calcular_placares(df_atual, df_b_dia, df_b_sem, df_b_mes)
+    print(f"[*] Placares — Dia:{placares['dia']['total']} Sem:{placares['sem']['total']} Mês:{placares['mes']['total']}")
+
+    html = gerar_html(args.base, args.atual, em_andamento, finalizadas, adicionadas,
+                      placares=placares)
 
     out = args.output or f"Relatorio_Pendencias_{datetime.now().strftime('%d-%m-%y_%H%M%S')}.html"
     with open(out,"w",encoding="utf-8") as f:
