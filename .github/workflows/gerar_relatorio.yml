@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'data/**.xlsx'   # dispara quando qualquer .xlsx na pasta data/ for alterado
+      - 'scripts/**.py'
 
   workflow_dispatch:     # permite rodar manualmente pelo GitHub
 
