@@ -931,8 +931,6 @@ function renderPlacares(){{
     (!filtroResp  || r.resp===filtroResp)
     );
     const filtrados = filtrados_resp;
-      // por_dep não tem resp/grupo granular, filtro aplicado na tabela abaixo
-    );
     const total_dep=filtrados.reduce((a,b)=>a+b.n,0);
     document.getElementById(`pc-${{p}}-num`).textContent=total_dep;
     const container=document.getElementById(`pc-${{p}}-deps`);
