@@ -913,26 +913,21 @@ function toggleComt(btn){{
 function renderPlacares(){{
   const sec=document.getElementById('placares-section');
   if(!PLACARES||Object.keys(PLACARES).length===0){{sec.style.display='none';return;}}
-
-  // Verifica se há qualquer baixa em qualquer período para este dep
-  const temDados = ['dia','sem','mes'].some(p=>{{
-    const pd=PLACARES[p]||{{por_dep:[]}};
-    return pd.por_dep.some(r=>r.unidade===filialAtual&&r.dep===depAtual);
+  const temDados=['dia','sem','mes'].some(p=>{{
+    const pd=PLACARES[p]||{{por_resp:[]}};
+    return pd.por_resp.some(r=>r.unidade===filialAtual&&r.dep===depAtual);
   }});
-  sec.style.display = temDados ? 'block' : 'none';
-
- // DEPOIS:
+  sec.style.display=temDados?'block':'none';
   ['dia','sem','mes'].forEach(p=>{{
-    const pd=PLACARES[p]||{{total:0,por_dep:[]}};
-    const filtrados_resp=pd.por_resp.filter(r=>
-     r.unidade===filialAtual &&
-      r.dep===depAtual &&
-      (!filtroCoord || (r.coord||'').split('|').map(s=>s.trim()).includes(filtroCoord)) &&
-    (!filtroResp  || r.resp===filtroResp)
+    const pd=PLACARES[p]||{{total:0,por_resp:[]}};
+    const filtrados=pd.por_resp.filter(r=>
+      r.unidade===filialAtual&&
+      r.dep===depAtual&&
+      (!filtroCoord||(r.coord||'').split('|').map(s=>s.trim()).includes(filtroCoord))&&
+      (!filtroResp||r.resp===filtroResp)
     );
-    const filtrados = filtrados_resp;
-    const total_dep=filtrados.reduce((a,b)=>a+b.n,0);
-    document.getElementById(`pc-${{p}}-num`).textContent=total_dep;
+    const total=filtrados.reduce((a,b)=>a+b.n,0);
+    document.getElementById(`pc-${{p}}-num`).textContent=total;
     const container=document.getElementById(`pc-${{p}}-deps`);
     if(!filtrados.length){{container.innerHTML='<div class="pc-empty">Nenhuma baixa neste período</div>';return;}}
     const max_n=Math.max(...filtrados.map(r=>r.n),1);
