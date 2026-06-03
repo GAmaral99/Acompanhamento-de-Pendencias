@@ -924,9 +924,13 @@ function renderPlacares(){{
  // DEPOIS:
   ['dia','sem','mes'].forEach(p=>{{
     const pd=PLACARES[p]||{{total:0,por_dep:[]}};
-    const filtrados=pd.por_dep.filter(r=>
-      r.unidade===filialAtual &&
-      r.dep===depAtual
+    const filtrados_resp=pd.por_resp.filter(r=>
+     r.unidade===filialAtual &&
+      r.dep===depAtual &&
+      (!filtroCoord || (r.coord||'').split('|').map(s=>s.trim()).includes(filtroCoord)) &&
+    (!filtroResp  || r.resp===filtroResp)
+    );
+    const filtrados = filtrados_resp;
       // por_dep não tem resp/grupo granular, filtro aplicado na tabela abaixo
     );
     const total_dep=filtrados.reduce((a,b)=>a+b.n,0);
@@ -936,7 +940,7 @@ function renderPlacares(){{
     const max_n=Math.max(...filtrados.map(r=>r.n),1);
     container.innerHTML=filtrados.map(r=>{{
       const pct=Math.round(r.n/max_n*100);
-      return `<div class="pc-dep-row"><span class="pc-dep-name" title="${{r.dep}}">${{r.dep}}</span><span class="pc-dep-n">${{r.n}}</span></div><div class="pc-bar-wrap"><div class="pc-bar" style="width:${{pct}}%"></div></div>`;
+      return `<div class="pc-dep-row"><span class="pc-dep-name" title="${{r.resp}}">${{r.resp}}</span><span class="pc-dep-n">${{r.n}}</span></div><div class="pc-bar-wrap"><div class="pc-bar" style="width:${{pct}}%"></div></div>`;
     }}).join('');
   }});
 }}
