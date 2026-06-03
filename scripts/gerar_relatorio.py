@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MG Contécnica – Gerador de Relatório HTML Consolidado
-Versão 6.0
+Versão 6.1
 """
 
 import os, re, sys, json, argparse
@@ -42,18 +42,11 @@ def limpar(v):
     return "" if s in ("nan", "None", "NaT") else s
 
 def carregar_coordenadores(caminho):
-    """
-    Lê a planilha de coordenadores e retorna dois dicts:
-      - resp_to_coords: { nome_exibicao: [coord1, coord2, ...] }
-      - all_coords: set de todos os coordenadores
-    Coordenadores "puros" (que aparecem só na coluna D) mapeiam para si mesmos.
-    """
     if not caminho or not os.path.exists(caminho):
         return {}, set()
     try:
         df = pd.read_excel(caminho, sheet_name=0, header=0)
         df.columns = [str(c).strip() for c in df.columns]
-        # Garante 4 colunas: NomeCompleto, NomeExibicao, Departamento, Coordenador
         if len(df.columns) < 4:
             return {}, set()
         col_exib  = df.columns[1]
@@ -63,7 +56,7 @@ def carregar_coordenadores(caminho):
         all_coords = set()
 
         for _, row in df.iterrows():
-            nome  = limpar(str(row[col_exib]))
+            nome      = limpar(str(row[col_exib]))
             coord_raw = limpar(str(row[col_coord]))
             if not nome or not coord_raw:
                 continue
@@ -72,7 +65,6 @@ def carregar_coordenadores(caminho):
             for c in coords:
                 all_coords.add(c)
 
-        # Coordenadores "puros" (só na col D) → mapeiam para si mesmos
         for coord in list(all_coords):
             if coord not in resp_to_coords:
                 resp_to_coords[coord] = [coord]
@@ -98,7 +90,6 @@ def ler_relatorio(caminho, resp_to_coords=None):
         comt_raw     = limpar(row.get(C_COMENTARIO, ""))
         responsavel  = limpar(row.get(C_RESPONSAVEL, ""))
 
-        # Resolução de coordenador
         coord_list = []
         if resp_to_coords and responsavel:
             coord_list = resp_to_coords.get(responsavel, [])
@@ -126,9 +117,9 @@ def ler_relatorio(caminho, resp_to_coords=None):
 
 def comparar(df_base, df_atual):
     cb = set(df_base["chave"]); ca = set(df_atual["chave"])
-    return (df_atual[df_atual["chave"].isin(ca)].copy(),          # em_andamento = TUDO do atual
-            df_base[df_base["chave"].isin(cb - ca)].copy(),       # baixadas
-            df_atual[df_atual["chave"].isin(ca - cb)].copy())     # reabertas
+    return (df_atual[df_atual["chave"].isin(ca)].copy(),
+            df_base[df_base["chave"].isin(cb - ca)].copy(),
+            df_atual[df_atual["chave"].isin(ca - cb)].copy())
 
 def df_to_js(df):
     if df.empty: return "[]"
@@ -162,7 +153,6 @@ def calcular_placares(df_atual, df_dia=None, df_sem=None, df_mes=None):
                          .size()
                          .reset_index(name="n")
                          .sort_values(["Unidade", "n"], ascending=[True, False]))
-            # Por responsável: agrupa por unidade, dep, responsavel, coordenador
             agg_resp = (baixas.groupby(["Unidade", "Departamento", "Responsavel", "Coordenador"])
                           .size()
                           .reset_index(name="n")
@@ -202,11 +192,9 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
 
     js_placares = json.dumps(placares or {}, ensure_ascii=False)
 
-    # Build sorted coordinator list for JS
     if all_coords:
         js_all_coords = json.dumps(sorted(all_coords), ensure_ascii=False)
     else:
-        # Derive from data if no external list provided
         coords_set = set()
         for df in [em_andamento, finalizadas, reabertas]:
             if not df.empty and "Coordenador" in df.columns:
@@ -225,7 +213,6 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
 <title>MG Contécnica · Relatório de Pendências</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <style>
 :root{{
@@ -355,15 +342,6 @@ body::before{{content:'';position:fixed;inset:0;
 .tab-content{{display:none}}
 .tab-content.ativo{{display:block}}
 
-/* ── CHARTS SECTION ── */
-.charts-section{{margin:32px 0 28px}}
-.charts-title{{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:10px}}
-.charts-title::after{{content:'';flex:1;height:1px;background:var(--border)}}
-.charts-grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
-.chart-card{{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:20px 24px}}
-.chart-card-title{{font-size:11px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:16px}}
-.chart-wrap{{position:relative;height:240px}}
-
 /* ── TABLE ── */
 .tbl-wrap{{overflow-x:auto;margin-top:14px}}
 table{{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}}
@@ -457,7 +435,7 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 @media(max-width:700px){{
   .filial-grid{{grid-template-columns:1fr}}
   #screen-dep,.results-body,.results-header{{padding:20px}}
-  .cards-row,.charts-grid{{grid-template-columns:1fr}}
+  .cards-row{{grid-template-columns:1fr}}
   .logo-bar{{padding:16px 20px 0}}
   .filter-bar{{flex-direction:column}}
   .filter-wrap{{max-width:100%}}
@@ -515,11 +493,11 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
     <div class="cards-row">
       <div class="stat-card man"><div class="sc-label">Em Andamento</div><div class="sc-num" id="sc-man">0</div><div class="sc-sub">tarefas abertas</div></div>
       <div class="stat-card fin"><div class="sc-label">Baixadas</div><div class="sc-num" id="sc-fin">0</div><div class="sc-sub">finalizadas desde a base</div></div>
-      <div class="stat-card add"><div class="sc-label">Reabertas</div><div class="sc-num" id="sc-add">0</div><div class="sc-sub">reabertas desde a base</div></div>    </div>
+      <div class="stat-card add"><div class="sc-label">Reabertas</div><div class="sc-num" id="sc-add">0</div><div class="sc-sub">reabertas desde a base</div></div>
+    </div>
 
     <!-- ══ FILTER BAR ══ -->
     <div class="filter-bar">
-      <!-- Coordenador -->
       <div>
         <div class="filter-label">Coordenador</div>
         <div class="filter-wrap" id="coord-wrap">
@@ -534,7 +512,6 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
           </div>
         </div>
       </div>
-      <!-- Responsável -->
       <div>
         <div class="filter-label">Responsável</div>
         <div class="filter-wrap" id="resp-wrap">
@@ -549,7 +526,6 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
           </div>
         </div>
       </div>
-      <!-- Grupo -->
       <div>
         <div class="filter-label">Grupo <span style="color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none;font-size:10px">(opcional)</span></div>
         <div class="filter-wrap" id="grupo-wrap">
@@ -619,12 +595,11 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
       </div>
     </div>
 
-
-
     <div class="tabs">
       <button class="tab-btn ativo"  id="tbtn-man" onclick="mudarTab('man',this)">Em Andamento <span class="badge" id="bdg-man" style="background:var(--red)">0</span></button>
       <button class="tab-btn t-fin"  id="tbtn-fin" onclick="mudarTab('fin',this)">Baixadas <span class="badge" id="bdg-fin" style="background:var(--green)">0</span></button>
-      <button class="tab-btn t-add"  id="tbtn-add" onclick="mudarTab('add',this)">Reabertas <span class="badge" id="bdg-add" style="background:var(--amber)">0</span></button>    </div>
+      <button class="tab-btn t-add"  id="tbtn-add" onclick="mudarTab('add',this)">Reabertas <span class="badge" id="bdg-add" style="background:var(--amber)">0</span></button>
+    </div>
 
     <div id="tab-man" class="tab-content ativo"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Título da Tarefa</th><th>Vencimento</th><th>Responsável</th><th>Previsão</th><th>Comentário</th></tr></thead><tbody id="tbody-man"></tbody></table></div></div>
     <div id="tab-fin" class="tab-content"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Título da Tarefa</th><th>Vencimento</th><th>Responsável</th><th>Previsão</th><th>Comentário</th></tr></thead><tbody id="tbody-fin"></tbody></table></div></div>
@@ -644,13 +619,12 @@ const ALL_COORDS = {js_all_coords};
 let filialAtual=null, depAtual=null;
 let filtroCoord=null, filtroResp=null, filtroGrupo=null;
 let abaAtual='man', bfPeriodoAtual='dia';
-let chartMan=null, chartComp=null;
 
-// ── Labels ───────────────────────────────────────────────────────────────────
+// ── Labels ────────────────────────────────────────────────────────────────────
 const LABELS = {{'SP':'São Paulo','Santos':'Santos','RJ':'Rio de Janeiro','GOIAS':'Goiás'}};
 function labelFilial(f){{ return LABELS[f]||f; }}
 
-// ── Data helpers ─────────────────────────────────────────────────────────────
+// ── Data helpers ──────────────────────────────────────────────────────────────
 function getFiliais(){{
   return [...new Set([...DATA.man,...DATA.fin,...DATA.add].map(r=>r.unidade))].sort();
 }}
@@ -661,14 +635,12 @@ function countIn(arr,filial,dep){{
   return arr.filter(r=>r.unidade===filial&&r.dep===dep).length;
 }}
 
-/** Verifica se uma row passa pelo filtro de coordenador */
 function rowPassaCoord(r){{
   if(!filtroCoord) return true;
   if(!r.coord) return false;
   return r.coord.split('|').map(s=>s.trim()).includes(filtroCoord);
 }}
 
-/** Verifica se uma row passa por todos os filtros ativos */
 function filtrar(arr){{
   return arr.filter(r =>
     r.unidade === filialAtual &&
@@ -679,7 +651,7 @@ function filtrar(arr){{
   );
 }}
 
-// ── Screens ──────────────────────────────────────────────────────────────────
+// ── Screens ───────────────────────────────────────────────────────────────────
 function showScreen(id){{document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);}}
 function voltarFilial(){{showScreen('screen-filial');filialAtual=null;depAtual=null;}}
 function voltarDep(){{showScreen('screen-dep');depAtual=null;filtroCoord=null;filtroResp=null;filtroGrupo=null;}}
@@ -711,7 +683,7 @@ function selecionarFilial(filial){{
     const a=countIn(DATA.add,filial,dep);
     const el=document.createElement('div');
     el.className='dep-item';
-    el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-fin">${{a}}</span>`:''}}</div>`;
+    el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-add">${{a}}</span>`:''}}</div>`;
     el.onclick=()=>selecionarDep(dep);
     list.appendChild(el);
   }});
@@ -729,7 +701,6 @@ function selecionarDep(dep){{
   document.getElementById('tbtn-man').classList.add('ativo');
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('ativo'));
   document.getElementById('tab-man').classList.add('ativo');
-  // Reset bf tabs
   document.querySelectorAll('.bf-tab').forEach(b=>b.classList.remove('ativo'));
   document.getElementById('bf-tab-dia').classList.add('ativo');
 
@@ -741,31 +712,26 @@ function selecionarDep(dep){{
 }}
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ── GENERIC DROPDOWN SYSTEM ───────────────────────────────────────────────────
+// ── DROPDOWN SYSTEM ───────────────────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════════════
 
-/** Constrói as opções para cada filtro baseado nos dados filtrados pelos outros filtros */
 function getOpcoesFiltro(tipo){{
-  // Dados do dep atual (sem aplicar o próprio filtro desse tipo)
   const all = [...DATA.man,...DATA.fin,...DATA.add].filter(r => r.unidade===filialAtual && r.dep===depAtual);
 
   if(tipo==='coord'){{
-    // Todos os coordenadores presentes nos dados do dep
     const cnt={{}};
     all.forEach(r=>{{
       const coords = r.coord ? r.coord.split('|').map(s=>s.trim()).filter(Boolean) : [];
-      // Também mostrar "Sem coordenador" se não tiver coord
       if(!coords.length){{ cnt['']=(cnt['']||0)+1; return; }}
       coords.forEach(c=>{{ cnt[c]=(cnt[c]||0)+1; }});
     }});
     return Object.entries(cnt)
-      .filter(([k])=>k) // só coordenadores com nome
+      .filter(([k])=>k)
       .sort((a,b)=>b[1]-a[1])
       .map(([k,v])=>{{return{{valor:k,label:k,count:v}}}});
   }}
 
   if(tipo==='resp'){{
-    // Responsáveis que pertencem ao coordenador selecionado (se houver)
     const filtrados = filtroCoord
       ? all.filter(r=>r.coord && r.coord.split('|').map(s=>s.trim()).includes(filtroCoord))
       : all;
@@ -777,7 +743,6 @@ function getOpcoesFiltro(tipo){{
   }}
 
   if(tipo==='grupo'){{
-    // Grupos filtrados pelos filtros de coord e resp ativos
     const filtrados = all.filter(r=>
       rowPassaCoord(r) &&
       (!filtroResp || r.resp===filtroResp)
@@ -850,7 +815,7 @@ function atualizarBotaoFiltro(tipo, valor, placeholder){{
 function selecionarFiltro(tipo, valor, label){{
   if(tipo==='coord'){{
     filtroCoord=valor;
-    filtroResp=null;  // reset responsavel ao mudar coordenador
+    filtroResp=null;
     atualizarBotaoFiltro('coord', valor, 'Todos os coordenadores');
     atualizarBotaoFiltro('resp', null, 'Todos os responsáveis');
     renderDropdownOpcoes('resp','');
@@ -888,7 +853,6 @@ function limparFiltro(tipo){{
   renderAll(); renderPlacares(); renderBaixasFunc();
 }}
 
-// Fecha dropdown ao clicar fora
 document.addEventListener('click',e=>{{
   const wraps=['coord-wrap','resp-wrap','grupo-wrap'];
   const inside=wraps.some(id=>{{const el=document.getElementById(id);return el&&el.contains(e.target);}});
@@ -946,20 +910,25 @@ function toggleComt(btn){{
   btn.textContent=open?'Ocultar':'Ver comentário';
 }}
 
-// ── Placares de Baixas ───────────────────────────────────────────────────────
+// ── Placares de Baixas ────────────────────────────────────────────────────────
 function renderPlacares(){{
   const sec=document.getElementById('placares-section');
   if(!PLACARES||Object.keys(PLACARES).length===0){{sec.style.display='none';return;}}
-  sec.style.display='block';
+
+  // Verifica se há qualquer baixa em qualquer período para este dep
+  const temDados = ['dia','sem','mes'].some(p=>{{
+    const pd=PLACARES[p]||{{por_dep:[]}};
+    return pd.por_dep.some(r=>r.unidade===filialAtual&&r.dep===depAtual);
+  }});
+  sec.style.display = temDados ? 'block' : 'none';
 
   ['dia','sem','mes'].forEach(p=>{{
     const pd=PLACARES[p]||{{total:0,por_dep:[]}};
-    // Filtra por dep atual e pelos filtros ativos
-    let filtrados=pd.por_dep.filter(r=>r.unidade===filialAtual&&r.dep===depAtual);
+    const filtrados=pd.por_dep.filter(r=>r.unidade===filialAtual&&r.dep===depAtual);
     const total_dep=filtrados.reduce((a,b)=>a+b.n,0);
     document.getElementById(`pc-${{p}}-num`).textContent=total_dep;
     const container=document.getElementById(`pc-${{p}}-deps`);
-    if(!filtrados.length){{container.innerHTML='<div class="pc-empty">Nenhuma baixa neste departamento</div>';return;}}
+    if(!filtrados.length){{container.innerHTML='<div class="pc-empty">Nenhuma baixa neste período</div>';return;}}
     const max_n=Math.max(...filtrados.map(r=>r.n),1);
     container.innerHTML=filtrados.map(r=>{{
       const pct=Math.round(r.n/max_n*100);
@@ -968,29 +937,42 @@ function renderPlacares(){{
   }});
 }}
 
-// ── Baixas por Funcionário ────────────────────────────────────────────────────
+// ── Baixas por Funcionário ─────────────────────────────────────────────────────
 function renderBaixasFunc(){{
   const sec=document.getElementById('baixas-func-section');
   if(!PLACARES||Object.keys(PLACARES).length===0){{sec.style.display='none';return;}}
 
+  // Verifica se há dados em qualquer período para este dep
+  const temDados = ['dia','sem','mes'].some(p=>{{
+    const pd=PLACARES[p]||{{por_resp:[]}};
+    return pd.por_resp.some(r=>
+      r.unidade===filialAtual &&
+      r.dep===depAtual &&
+      (!filtroCoord || r.coord.split('|').map(s=>s.trim()).includes(filtroCoord)) &&
+      (!filtroResp  || r.resp===filtroResp)
+    );
+  }});
+
+  // Sempre mostra a seção se houver dados em qualquer período
+  sec.style.display = temDados ? 'block' : 'none';
+  if(!temDados) return;
+
   const pd=PLACARES[bfPeriodoAtual]||{{total:0,por_resp:[]}};
-  // Filtra por unidade, dep, e filtros ativos
-  let rows=pd.por_resp.filter(r=>
+  const rows=pd.por_resp.filter(r=>
     r.unidade===filialAtual &&
     r.dep===depAtual &&
     (!filtroCoord || r.coord.split('|').map(s=>s.trim()).includes(filtroCoord)) &&
     (!filtroResp  || r.resp===filtroResp)
   );
 
+  // Se o período atual não tem dados, mostra mensagem mas mantém seção visível
   if(!rows.length){{
-    sec.style.display='none';
+    document.getElementById('bf-tbody').innerHTML=
+      '<tr><td colspan="5" class="bf-empty">Nenhuma baixa registrada neste período.</td></tr>';
     return;
   }}
-  sec.style.display='block';
 
   const maxN=Math.max(...rows.map(r=>r.n),1);
-
-  // Agrupa por departamento
   const porDep={{}};
   rows.forEach(r=>{{
     if(!porDep[r.dep]) porDep[r.dep]=[];
@@ -1012,7 +994,6 @@ function renderBaixasFunc(){{
       </tr>`;
     }});
   }});
-
   document.getElementById('bf-tbody').innerHTML=html;
 }}
 
@@ -1078,7 +1059,6 @@ def main():
                         help="Caminho para a planilha de coordenadores (ex: coordenadores.xlsx)")
     args = parser.parse_args()
 
-    # ── Carrega mapeamento de coordenadores ──────────────────────────────────
     resp_to_coords, all_coords = carregar_coordenadores(args.coordenadores)
     if args.coordenadores:
         print(f"[*] Coordenadores carregados: {len(all_coords)} coordenadores, {len(resp_to_coords)} responsáveis mapeados.")
