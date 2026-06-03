@@ -948,7 +948,7 @@ function renderBaixasFunc(){{
     return pd.por_resp.some(r=>
       r.unidade===filialAtual &&
       r.dep===depAtual &&
-      (!filtroCoord || r.coord.split('|').map(s=>s.trim()).includes(filtroCoord)) &&
+      (!filtroCoord || (r.coord||'').split('|').map(s=>s.trim()).includes(filtroCoord)) &&
       (!filtroResp  || r.resp===filtroResp)
     );
   }});
@@ -961,7 +961,7 @@ function renderBaixasFunc(){{
   const rows=pd.por_resp.filter(r=>
     r.unidade===filialAtual &&
     r.dep===depAtual &&
-    (!filtroCoord || r.coord.split('|').map(s=>s.trim()).includes(filtroCoord)) &&
+    (!filtroCoord || (r.coord||'').split('|').map(s=>s.trim()).includes(filtroCoord)) &&
     (!filtroResp  || r.resp===filtroResp)
   );
 
