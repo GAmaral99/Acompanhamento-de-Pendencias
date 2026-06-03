@@ -126,9 +126,9 @@ def ler_relatorio(caminho, resp_to_coords=None):
 
 def comparar(df_base, df_atual):
     cb = set(df_base["chave"]); ca = set(df_atual["chave"])
-    return (df_base[df_base["chave"].isin(cb & ca)].copy(),
-            df_base[df_base["chave"].isin(cb - ca)].copy(),
-            df_atual[df_atual["chave"].isin(ca - cb)].copy())
+    return (df_atual[df_atual["chave"].isin(ca)].copy(),          # em_andamento = TUDO do atual
+            df_base[df_base["chave"].isin(cb - ca)].copy(),       # baixadas
+            df_atual[df_atual["chave"].isin(ca - cb)].copy())     # reabertas
 
 def df_to_js(df):
     if df.empty: return "[]"
@@ -186,7 +186,7 @@ def calcular_placares(df_atual, df_dia=None, df_sem=None, df_mes=None):
             }
     return resultado
 
-def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionadas,
+def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas,
                placares=None, all_coords=None):
     nome_base  = os.path.basename(arquivo_base)
     nome_atual = os.path.basename(arquivo_atual) if arquivo_atual else nome_base
@@ -195,10 +195,10 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionad
 
     js_man = df_to_js(em_andamento)
     js_fin = df_to_js(finalizadas)
-    js_add = df_to_js(adicionadas)
+    js_add = df_to_js(reabertas)
     total_man = len(em_andamento)
     total_fin = len(finalizadas)
-    total_add = len(adicionadas)
+    total_add = len(reabertas)
 
     js_placares = json.dumps(placares or {}, ensure_ascii=False)
 
@@ -515,8 +515,7 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
     <div class="cards-row">
       <div class="stat-card man"><div class="sc-label">Em Andamento</div><div class="sc-num" id="sc-man">0</div><div class="sc-sub">tarefas abertas</div></div>
       <div class="stat-card fin"><div class="sc-label">Baixadas</div><div class="sc-num" id="sc-fin">0</div><div class="sc-sub">finalizadas desde a base</div></div>
-      <div class="stat-card add"><div class="sc-label">Adicionadas</div><div class="sc-num" id="sc-add">0</div><div class="sc-sub">novas desde a base</div></div>
-    </div>
+      <div class="stat-card add"><div class="sc-label">Reabertas</div><div class="sc-num" id="sc-add">0</div><div class="sc-sub">reabertas desde a base</div></div>    </div>
 
     <!-- ══ FILTER BAR ══ -->
     <div class="filter-bar">
@@ -638,8 +637,7 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
     <div class="tabs">
       <button class="tab-btn ativo"  id="tbtn-man" onclick="mudarTab('man',this)">Em Andamento <span class="badge" id="bdg-man" style="background:var(--red)">0</span></button>
       <button class="tab-btn t-fin"  id="tbtn-fin" onclick="mudarTab('fin',this)">Baixadas <span class="badge" id="bdg-fin" style="background:var(--green)">0</span></button>
-      <button class="tab-btn t-add"  id="tbtn-add" onclick="mudarTab('add',this)">Adicionadas <span class="badge" id="bdg-add" style="background:var(--amber)">0</span></button>
-    </div>
+      <button class="tab-btn t-add"  id="tbtn-add" onclick="mudarTab('add',this)">Reabertas <span class="badge" id="bdg-add" style="background:var(--amber)">0</span></button>    </div>
 
     <div id="tab-man" class="tab-content ativo"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Título da Tarefa</th><th>Vencimento</th><th>Responsável</th><th>Previsão</th><th>Comentário</th></tr></thead><tbody id="tbody-man"></tbody></table></div></div>
     <div id="tab-fin" class="tab-content"><div class="tbl-wrap"><table><thead><tr><th>Cliente</th><th>Título da Tarefa</th><th>Vencimento</th><th>Responsável</th><th>Previsão</th><th>Comentário</th></tr></thead><tbody id="tbody-fin"></tbody></table></div></div>
@@ -726,7 +724,7 @@ function selecionarFilial(filial){{
     const a=countIn(DATA.add,filial,dep);
     const el=document.createElement('div');
     el.className='dep-item';
-    el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-add">${{a}}</span>`:''}}</div>`;
+    el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-fin">${{a}}</span>`:''}}</div>`;
     el.onclick=()=>selecionarDep(dep);
     list.appendChild(el);
   }});
@@ -1186,15 +1184,15 @@ def main():
         print(f"[*] Lendo atual: {args.atual}")
         df_atual = ler_relatorio(args.atual, resp_to_coords)
         print(f"    {len(df_atual)} tarefas.")
-        em_andamento, finalizadas, adicionadas = comparar(df_base, df_atual)
+        em_andamento, finalizadas, reabertas = comparar(df_base, df_atual)
     else:
-        df_atual     = df_base
-        em_andamento = df_base.copy()
-        finalizadas  = pd.DataFrame(columns=df_base.columns)
-        adicionadas  = pd.DataFrame(columns=df_base.columns)
-        args.atual   = args.base
+       df_atual     = df_base
+       em_andamento = df_base.copy()
+       finalizadas  = pd.DataFrame(columns=df_base.columns)
+       reabertas    = pd.DataFrame(columns=df_base.columns)
+       args.atual   = args.base
 
-    print(f"[*] Man:{len(em_andamento)} Fin:{len(finalizadas)} Add:{len(adicionadas)}")
+    print(f"[*] Man:{len(em_andamento)} Fin:{len(finalizadas)} Rea:{len(reabertas)}")
 
     def ler_ou_none(caminho):
         if not caminho:
@@ -1214,8 +1212,8 @@ def main():
     placares = calcular_placares(df_atual, df_b_dia, df_b_sem, df_b_mes)
     print(f"[*] Placares — Dia:{placares['dia']['total']} Sem:{placares['sem']['total']} Mês:{placares['mes']['total']}")
 
-    html = gerar_html(args.base, args.atual, em_andamento, finalizadas, adicionadas,
-                      placares=placares, all_coords=all_coords or None)
+    html = gerar_html(args.base, args.atual, em_andamento, finalizadas, reabertas,
+                  placares=placares, all_coords=all_coords or None)
 
     out = args.output or f"Relatorio_Pendencias_{datetime.now().strftime('%d-%m-%y_%H%M%S')}.html"
     with open(out,"w",encoding="utf-8") as f:
