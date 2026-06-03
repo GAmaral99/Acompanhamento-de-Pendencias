@@ -119,7 +119,8 @@ def main():
     print(f"[*] BASE DIA : {arq_dia.name}   ({dt_dia.strftime('%d/%m/%Y %H:%M')})")
     print(f"[*] BASE SEM : {arq_sem.name}   ({dt_sem.strftime('%d/%m/%Y %H:%M')})")
     print(f"[*] BASE MÊS : {arq_mes.name}   ({dt_mes.strftime('%d/%m/%Y %H:%M')})")
-
+    
+    COORD_XLSX = r"C:\Users\gamaral\Desktop\repo\data\coordenadores\Coordenadores__SP-RJ-Santos_.xlsx"   
     cmd = [
         sys.executable, str(SCRIPT),
         str(arq_mes),    # base principal (mês) — mantém compatibilidade
@@ -127,6 +128,7 @@ def main():
         "--base-dia", str(arq_dia),
         "--base-sem", str(arq_sem),
         "--base-mes", str(arq_mes),
+        "--coordenadores", COORD_XLSX,
         "-o", str(OUTPUT),
     ]
 
