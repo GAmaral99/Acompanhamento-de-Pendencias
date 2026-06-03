@@ -619,20 +619,7 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
       </div>
     </div>
 
-    <!-- Charts -->
-    <div class="charts-section" id="charts-section">
-      <div class="charts-title">Evolução por Departamento</div>
-      <div class="charts-grid">
-        <div class="chart-card">
-          <div class="chart-card-title">Em Andamento por Departamento</div>
-          <div class="chart-wrap"><canvas id="chart-man"></canvas></div>
-        </div>
-        <div class="chart-card">
-          <div class="chart-card-title">Baixadas vs Adicionadas</div>
-          <div class="chart-wrap"><canvas id="chart-compare"></canvas></div>
-        </div>
-      </div>
-    </div>
+
 
     <div class="tabs">
       <button class="tab-btn ativo"  id="tbtn-man" onclick="mudarTab('man',this)">Em Andamento <span class="badge" id="bdg-man" style="background:var(--red)">0</span></button>
@@ -748,7 +735,6 @@ function selecionarDep(dep){{
 
   buildAllDropdowns();
   renderAll();
-  renderCharts();
   renderPlacares();
   renderBaixasFunc();
   showScreen('screen-results');
@@ -878,7 +864,7 @@ function selecionarFiltro(tipo, valor, label){{
     atualizarBotaoFiltro('grupo', valor, 'Todos os grupos');
   }}
   fecharTodosDropdowns();
-  renderAll(); renderCharts(); renderPlacares(); renderBaixasFunc();
+  renderAll(); renderPlacares(); renderBaixasFunc();
 }}
 
 function limparFiltro(tipo){{
@@ -899,7 +885,7 @@ function limparFiltro(tipo){{
     atualizarBotaoFiltro('grupo', null, 'Todos os grupos');
   }}
   fecharTodosDropdowns();
-  renderAll(); renderCharts(); renderPlacares(); renderBaixasFunc();
+  renderAll(); renderPlacares(); renderBaixasFunc();
 }}
 
 // Fecha dropdown ao clicar fora
@@ -958,83 +944,6 @@ function mudarTab(aba,btn){{
 function toggleComt(btn){{
   const open=btn.nextElementSibling.classList.toggle('open');
   btn.textContent=open?'Ocultar':'Ver comentário';
-}}
-
-// ── Charts ────────────────────────────────────────────────────────────────────
-Chart.defaults.color='#666';
-Chart.defaults.font.family="'Inter',sans-serif";
-
-function renderCharts(){{
-  const m=filtrar(DATA.man), f=filtrar(DATA.fin), a=filtrar(DATA.add);
-  const deps=[...new Set([...m,...f,...a].map(r=>r.dep))].sort();
-
-  if(chartMan)chartMan.destroy();
-  if(chartComp)chartComp.destroy();
-
-  if(!deps.length){{document.getElementById('charts-section').style.display='none';return;}}
-  document.getElementById('charts-section').style.display='block';
-
-  const shortDep=d=>d.length>18?d.substring(0,16)+'…':d;
-  const manCounts=deps.map(d=>m.filter(r=>r.dep===d).length);
-  const finCounts=deps.map(d=>f.filter(r=>r.dep===d).length);
-  const addCounts=deps.map(d=>a.filter(r=>r.dep===d).length);
-
-  const ctx1=document.getElementById('chart-man').getContext('2d');
-  chartMan=new Chart(ctx1,{{
-    type:'bar',
-    data:{{
-      labels:deps.map(shortDep),
-      datasets:[{{label:'Em Andamento',data:manCounts,backgroundColor:'rgba(227,30,36,.7)',borderColor:'#E31E24',borderWidth:1,borderRadius:4}}]
-    }},
-    options:{{
-      indexAxis:'y',responsive:true,maintainAspectRatio:false,
-      plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{title:i=>deps[i[0].dataIndex]}}}}}},
-      scales:{{
-        x:{{grid:{{color:'rgba(255,255,255,.05)'}},ticks:{{color:'#666',font:{{size:11}}}}}},
-        y:{{grid:{{display:false}},ticks:{{color:'#aaa',font:{{size:11}}}}}}
-      }}
-    }}
-  }});
-
-  const ctx2=document.getElementById('chart-compare').getContext('2d');
-  if(MODO_COMP && (f.length||a.length)){{
-    chartComp=new Chart(ctx2,{{
-      type:'bar',
-      data:{{
-        labels:deps.map(shortDep),
-        datasets:[
-          {{label:'Baixadas',data:finCounts,backgroundColor:'rgba(34,201,122,.7)',borderColor:'#22c97a',borderWidth:1,borderRadius:4}},
-          {{label:'Adicionadas',data:addCounts,backgroundColor:'rgba(245,166,35,.7)',borderColor:'#f5a623',borderWidth:1,borderRadius:4}}
-        ]
-      }},
-      options:{{
-        responsive:true,maintainAspectRatio:false,
-        plugins:{{legend:{{labels:{{color:'#aaa',font:{{size:11}}}}}},tooltip:{{callbacks:{{title:i=>deps[i[0].dataIndex]}}}}}},
-        scales:{{
-          x:{{grid:{{color:'rgba(255,255,255,.05)'}},ticks:{{color:'#666',font:{{size:11}}}}}},
-          y:{{grid:{{color:'rgba(255,255,255,.05)'}},ticks:{{color:'#666',font:{{size:11}}}}}}
-        }}
-      }}
-    }});
-  }} else {{
-    const total=manCounts.reduce((a,b)=>a+b,0);
-    if(total>0){{
-      chartComp=new Chart(ctx2,{{
-        type:'doughnut',
-        data:{{
-          labels:deps.map(shortDep),
-          datasets:[{{data:manCounts,backgroundColor:deps.map((_,i)=>`hsl(${{(i*47+5)%360}},60%,50%)`),borderColor:'#111',borderWidth:2}}]
-        }},
-        options:{{
-          responsive:true,maintainAspectRatio:false,
-          plugins:{{
-            legend:{{position:'right',labels:{{color:'#aaa',font:{{size:10}},boxWidth:12}}}},
-            tooltip:{{callbacks:{{title:i=>deps[i[0].dataIndex],label:i=>`${{i.raw}} (${{Math.round(i.raw/total*100)}}%)`}}}}
-          }}
-        }}
-      }});
-    }}
-  }}
 }}
 
 // ── Placares de Baixas ───────────────────────────────────────────────────────
