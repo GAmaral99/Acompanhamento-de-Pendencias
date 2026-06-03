@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 MG Contécnica – Gerador de Relatório HTML Consolidado
-Versão 5.0
+Versão 6.0
 """
 
 import os, re, sys, json, argparse
@@ -41,7 +41,48 @@ def limpar(v):
     s = str(v).strip()
     return "" if s in ("nan", "None", "NaT") else s
 
-def ler_relatorio(caminho):
+def carregar_coordenadores(caminho):
+    """
+    Lê a planilha de coordenadores e retorna dois dicts:
+      - resp_to_coords: { nome_exibicao: [coord1, coord2, ...] }
+      - all_coords: set de todos os coordenadores
+    Coordenadores "puros" (que aparecem só na coluna D) mapeiam para si mesmos.
+    """
+    if not caminho or not os.path.exists(caminho):
+        return {}, set()
+    try:
+        df = pd.read_excel(caminho, sheet_name=0, header=0)
+        df.columns = [str(c).strip() for c in df.columns]
+        # Garante 4 colunas: NomeCompleto, NomeExibicao, Departamento, Coordenador
+        if len(df.columns) < 4:
+            return {}, set()
+        col_exib  = df.columns[1]
+        col_coord = df.columns[3]
+
+        resp_to_coords = {}
+        all_coords = set()
+
+        for _, row in df.iterrows():
+            nome  = limpar(str(row[col_exib]))
+            coord_raw = limpar(str(row[col_coord]))
+            if not nome or not coord_raw:
+                continue
+            coords = [c.strip() for c in coord_raw.split("|") if c.strip()]
+            resp_to_coords[nome] = coords
+            for c in coords:
+                all_coords.add(c)
+
+        # Coordenadores "puros" (só na col D) → mapeiam para si mesmos
+        for coord in list(all_coords):
+            if coord not in resp_to_coords:
+                resp_to_coords[coord] = [coord]
+
+        return resp_to_coords, all_coords
+    except Exception as e:
+        print(f"[!] Erro ao carregar coordenadores: {e}")
+        return {}, set()
+
+def ler_relatorio(caminho, resp_to_coords=None):
     try:
         df_raw = pd.read_excel(caminho, sheet_name=SHEET, dtype=str)
     except Exception as e:
@@ -55,6 +96,13 @@ def ler_relatorio(caminho):
         dep_norm     = normalizar_dep(dep_raw)
         cliente_novo = bool(re.search(r'\(Cliente Novo\)', dep_raw, re.IGNORECASE))
         comt_raw     = limpar(row.get(C_COMENTARIO, ""))
+        responsavel  = limpar(row.get(C_RESPONSAVEL, ""))
+
+        # Resolução de coordenador
+        coord_list = []
+        if resp_to_coords and responsavel:
+            coord_list = resp_to_coords.get(responsavel, [])
+
         registros.append({
             "CodCliente":   limpar(row.get(C_COD_CLIENTE, "")),
             "RazaoSocial":  limpar(row.get(C_RAZAO, "")),
@@ -64,10 +112,11 @@ def ler_relatorio(caminho):
             "Titulo":       titulo,
             "Vencimento":   formatar_data(row.get(C_VENCIMENTO, "")),
             "Previsao":     formatar_data(row.get(C_PREVISAO, "")),
-            "Responsavel":  limpar(row.get(C_RESPONSAVEL, "")),
+            "Responsavel":  responsavel,
             "Grupo":        limpar(row.get(C_GRUPO, "")),
             "Comentario":   comt_raw,
             "DataComt":     extrair_data_comentario(comt_raw),
+            "Coordenador":  "|".join(coord_list),
             "chave":        f"{limpar(row.get(C_COD_CLIENTE,''))}||{limpar(row.get('Cod',''))}||{dep_norm}||{titulo}",
         })
     df = pd.DataFrame(registros)
@@ -85,18 +134,17 @@ def df_to_js(df):
     if df.empty: return "[]"
     rows = []
     for _, r in df.iterrows():
-        rows.append({"unidade": r["Unidade"], "dep": r["Departamento"], "novo": r["ClienteNovo"],
-                     "tit": r["Titulo"], "venc": r["Vencimento"], "prev": r["Previsao"],
-                     "resp": r["Responsavel"], "grupo": r["Grupo"],
-                     "cod": r["CodCliente"], "razao": r["RazaoSocial"],
-                     "dataComt": r["DataComt"], "comt": r["Comentario"]})
+        rows.append({
+            "unidade": r["Unidade"], "dep": r["Departamento"], "novo": r["ClienteNovo"],
+            "tit": r["Titulo"], "venc": r["Vencimento"], "prev": r["Previsao"],
+            "resp": r["Responsavel"], "grupo": r["Grupo"],
+            "cod": r["CodCliente"], "razao": r["RazaoSocial"],
+            "dataComt": r["DataComt"], "comt": r["Comentario"],
+            "coord": r.get("Coordenador", ""),
+        })
     return json.dumps(rows, ensure_ascii=False)
 
 def calcular_placares(df_atual, df_dia=None, df_sem=None, df_mes=None):
-    """
-    Retorna dict com baixas (chaves que saíram) por período e por departamento/unidade.
-    Estrutura: { "dia": { "total": N, "por_dep": [{"dep":..,"unidade":..,"n":..}, ...] }, ... }
-    """
     def baixas_entre(df_base, df_ref):
         if df_base is None or df_ref is None:
             return pd.DataFrame()
@@ -108,23 +156,38 @@ def calcular_placares(df_atual, df_dia=None, df_sem=None, df_mes=None):
     for periodo, df_b in [("dia", df_dia), ("sem", df_sem), ("mes", df_mes)]:
         baixas = baixas_entre(df_b, df_atual)
         if baixas.empty:
-            resultado[periodo] = {"total": 0, "por_dep": []}
+            resultado[periodo] = {"total": 0, "por_dep": [], "por_resp": []}
         else:
-            agg = (baixas.groupby(["Unidade", "Departamento"])
+            agg_dep = (baixas.groupby(["Unidade", "Departamento"])
                          .size()
                          .reset_index(name="n")
                          .sort_values(["Unidade", "n"], ascending=[True, False]))
+            # Por responsável: agrupa por unidade, dep, responsavel, coordenador
+            agg_resp = (baixas.groupby(["Unidade", "Departamento", "Responsavel", "Coordenador"])
+                          .size()
+                          .reset_index(name="n")
+                          .sort_values(["Unidade", "Departamento", "n"], ascending=[True, True, False]))
             resultado[periodo] = {
                 "total": int(baixas.shape[0]),
                 "por_dep": [
                     {"unidade": r["Unidade"], "dep": r["Departamento"], "n": int(r["n"])}
-                    for _, r in agg.iterrows()
-                ]
+                    for _, r in agg_dep.iterrows()
+                ],
+                "por_resp": [
+                    {
+                        "unidade": r["Unidade"],
+                        "dep": r["Departamento"],
+                        "resp": r["Responsavel"],
+                        "coord": r["Coordenador"],
+                        "n": int(r["n"])
+                    }
+                    for _, r in agg_resp.iterrows()
+                ],
             }
     return resultado
 
 def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionadas,
-               placares=None):
+               placares=None, all_coords=None):
     nome_base  = os.path.basename(arquivo_base)
     nome_atual = os.path.basename(arquivo_atual) if arquivo_atual else nome_base
     gerado_em  = datetime.now().strftime("%d/%m/%Y às %H:%M")
@@ -138,6 +201,21 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionad
     total_add = len(adicionadas)
 
     js_placares = json.dumps(placares or {}, ensure_ascii=False)
+
+    # Build sorted coordinator list for JS
+    if all_coords:
+        js_all_coords = json.dumps(sorted(all_coords), ensure_ascii=False)
+    else:
+        # Derive from data if no external list provided
+        coords_set = set()
+        for df in [em_andamento, finalizadas, adicionadas]:
+            if not df.empty and "Coordenador" in df.columns:
+                for val in df["Coordenador"].dropna():
+                    for c in str(val).split("|"):
+                        c = c.strip()
+                        if c:
+                            coords_set.add(c)
+        js_all_coords = json.dumps(sorted(coords_set), ensure_ascii=False)
 
     return f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -154,7 +232,7 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, adicionad
   --bg:#0a0a0a;--surface:#111111;--surface2:#181818;--border:#2a2a2a;
   --red:#E31E24;--red-dim:#7a1012;--red-glow:rgba(227,30,36,.18);
   --white:#ffffff;--off-white:#f0f0f0;--muted:#666;--muted2:#444;
-  --green:#22c97a;--amber:#f5a623;
+  --green:#22c97a;--amber:#f5a623;--blue:#4da6ff;
   --font:'Inter',sans-serif;--mono:'JetBrains Mono',monospace;
 }}
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
@@ -237,31 +315,34 @@ body::before{{content:'';position:fixed;inset:0;
 .stat-card.add .sc-num{{color:var(--amber)}}
 .sc-sub{{font-size:11px;color:var(--muted);margin-top:4px}}
 
-/* ── GRUPO DROPDOWN ── */
-.grupo-bar{{display:flex;align-items:center;gap:12px;margin-bottom:20px;position:relative}}
-.grupo-label{{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);white-space:nowrap}}
-.grupo-select-wrap{{position:relative;flex:1;max-width:380px}}
-.grupo-select-btn{{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--white);font-family:var(--font);font-size:13px;font-weight:500;padding:9px 36px 9px 14px;border-radius:8px;cursor:pointer;text-align:left;transition:border-color .18s;display:flex;align-items:center;justify-content:space-between;gap:8px}}
-.grupo-select-btn:hover,.grupo-select-btn.open{{border-color:var(--red)}}
-.grupo-select-btn .arrow{{font-size:10px;color:var(--muted);transition:transform .18s;flex-shrink:0}}
-.grupo-select-btn.open .arrow{{transform:rotate(180deg)}}
-.grupo-dropdown{{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;z-index:100;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6);display:none;flex-direction:column}}
-.grupo-dropdown.open{{display:flex}}
-.grupo-search{{padding:10px 12px;border-bottom:1px solid var(--border)}}
-.grupo-search input{{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--white);font-family:var(--font);font-size:12px;padding:6px 10px;border-radius:6px;outline:none}}
-.grupo-search input:focus{{border-color:var(--red)}}
-.grupo-options{{max-height:260px;overflow-y:auto}}
-.grupo-options::-webkit-scrollbar{{width:4px}}
-.grupo-options::-webkit-scrollbar-track{{background:transparent}}
-.grupo-options::-webkit-scrollbar-thumb{{background:var(--border);border-radius:4px}}
-.grupo-opt{{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;transition:background .15s;font-size:13px}}
-.grupo-opt:hover{{background:rgba(227,30,36,.08)}}
-.grupo-opt.sel{{background:rgba(227,30,36,.12);color:var(--red)}}
-.grupo-opt-name{{font-weight:500}}
-.grupo-opt-count{{font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surface);padding:1px 7px;border-radius:10px}}
-.grupo-opt.sel .grupo-opt-count{{background:rgba(227,30,36,.2);color:var(--red)}}
-.grupo-clear{{padding:8px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);cursor:pointer;transition:color .15s;text-align:center;font-weight:600;letter-spacing:.06em;text-transform:uppercase}}
-.grupo-clear:hover{{color:var(--red)}}
+/* ── FILTER BAR ── */
+.filter-bar{{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px;flex-wrap:wrap}}
+
+/* ── GENERIC DROPDOWN ── */
+.filter-wrap{{position:relative;min-width:200px;max-width:340px;flex:1}}
+.filter-label{{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);white-space:nowrap;margin-bottom:6px}}
+.filter-select-btn{{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--white);font-family:var(--font);font-size:13px;font-weight:500;padding:9px 36px 9px 14px;border-radius:8px;cursor:pointer;text-align:left;transition:border-color .18s;display:flex;align-items:center;justify-content:space-between;gap:8px}}
+.filter-select-btn:hover,.filter-select-btn.open{{border-color:var(--red)}}
+.filter-select-btn .arrow{{font-size:10px;color:var(--muted);transition:transform .18s;flex-shrink:0}}
+.filter-select-btn.open .arrow{{transform:rotate(180deg)}}
+.filter-dropdown{{position:absolute;top:calc(100% + 6px);left:0;right:0;background:var(--surface2);border:1px solid var(--border);border-radius:10px;z-index:200;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.6);display:none;flex-direction:column}}
+.filter-dropdown.open{{display:flex}}
+.filter-search{{padding:10px 12px;border-bottom:1px solid var(--border)}}
+.filter-search input{{width:100%;background:var(--surface);border:1px solid var(--border);color:var(--white);font-family:var(--font);font-size:12px;padding:6px 10px;border-radius:6px;outline:none}}
+.filter-search input:focus{{border-color:var(--red)}}
+.filter-options{{max-height:240px;overflow-y:auto}}
+.filter-options::-webkit-scrollbar{{width:4px}}
+.filter-options::-webkit-scrollbar-track{{background:transparent}}
+.filter-options::-webkit-scrollbar-thumb{{background:var(--border);border-radius:4px}}
+.filter-opt{{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;cursor:pointer;transition:background .15s;font-size:13px}}
+.filter-opt:hover{{background:rgba(227,30,36,.08)}}
+.filter-opt.sel{{background:rgba(227,30,36,.12);color:var(--red)}}
+.filter-opt-name{{font-weight:500}}
+.filter-opt-count{{font-size:11px;font-family:var(--mono);color:var(--muted);background:var(--surface);padding:1px 7px;border-radius:10px}}
+.filter-opt.sel .filter-opt-count{{background:rgba(227,30,36,.2);color:var(--red)}}
+.filter-clear{{padding:8px 14px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);cursor:pointer;transition:color .15s;text-align:center;font-weight:600;letter-spacing:.06em;text-transform:uppercase}}
+.filter-clear:hover{{color:var(--red)}}
+.filter-disabled .filter-select-btn{{opacity:.4;cursor:not-allowed;pointer-events:none}}
 
 /* ── TABS ── */
 .tabs{{display:flex;gap:2px;border-bottom:1px solid var(--border);margin-bottom:0}}
@@ -341,6 +422,33 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 .placar-card.pc-mes .pc-bar{{background:var(--green)}}
 .pc-empty{{font-size:12px;color:var(--muted);font-style:italic;padding:8px 0}}
 
+/* ── BAIXAS POR FUNCIONÁRIO TABLE ── */
+.baixas-func-section{{margin:32px 0 28px}}
+.baixas-func-title{{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin-bottom:16px;display:flex;align-items:center;gap:10px}}
+.baixas-func-title::after{{content:'';flex:1;height:1px;background:var(--border)}}
+.baixas-func-periodo-tabs{{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}}
+.bf-tab{{background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--font);font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:6px 14px;border-radius:20px;cursor:pointer;transition:all .18s}}
+.bf-tab:hover{{border-color:var(--green);color:var(--green)}}
+.bf-tab.ativo{{background:rgba(34,201,122,.12);border-color:var(--green);color:var(--green)}}
+.bf-table-wrap{{overflow-x:auto}}
+.bf-table{{width:100%;border-collapse:collapse;font-size:13px;background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden}}
+.bf-table thead tr{{background:var(--surface2)}}
+.bf-table thead th{{padding:10px 14px;text-align:left;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}}
+.bf-table thead th:last-child{{text-align:right}}
+.bf-table tbody tr{{border-bottom:1px solid var(--border);transition:background .12s}}
+.bf-table tbody tr:last-child{{border-bottom:none}}
+.bf-table tbody tr:hover{{background:rgba(255,255,255,.02)}}
+.bf-table tbody td{{padding:9px 14px;vertical-align:middle}}
+.bf-table tbody td:last-child{{text-align:right}}
+.bf-dep-row td{{background:rgba(34,201,122,.05);color:var(--green);font-weight:700;font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-top:1px solid var(--border)}}
+.bf-resp-name{{font-size:12px;font-weight:600;color:var(--white)}}
+.bf-coord-badge{{font-size:10px;color:var(--blue);font-family:var(--mono);margin-left:8px}}
+.bf-num{{font-size:14px;font-weight:700;color:var(--green);font-family:var(--mono)}}
+.bf-bar-cell{{width:120px}}
+.bf-bar-bg{{background:rgba(34,201,122,.1);border-radius:3px;height:6px;overflow:hidden}}
+.bf-bar-fill{{height:100%;background:var(--green);border-radius:3px;transition:width .3s}}
+.bf-empty{{color:var(--muted);font-size:13px;padding:24px 16px;text-align:center;font-style:italic}}
+
 /* capture overlay */
 .capture-overlay{{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}}
 .capture-spinner{{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite}}
@@ -351,6 +459,9 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
   #screen-dep,.results-body,.results-header{{padding:20px}}
   .cards-row,.charts-grid{{grid-template-columns:1fr}}
   .logo-bar{{padding:16px 20px 0}}
+  .filter-bar{{flex-direction:column}}
+  .filter-wrap{{max-width:100%}}
+  .placares-grid{{grid-template-columns:1fr}}
 }}
 </style>
 </head>
@@ -407,18 +518,51 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
       <div class="stat-card add"><div class="sc-label">Adicionadas</div><div class="sc-num" id="sc-add">0</div><div class="sc-sub">novas desde a base</div></div>
     </div>
 
-    <!-- Grupo filter dropdown -->
-    <div class="grupo-bar">
-      <span class="grupo-label">Grupo:</span>
-      <div class="grupo-select-wrap" id="grupo-wrap">
-        <button class="grupo-select-btn" id="grupo-btn" onclick="toggleDropdown()">
-          <span id="grupo-btn-label">Todos os grupos</span>
-          <span class="arrow">▼</span>
-        </button>
-        <div class="grupo-dropdown" id="grupo-dropdown">
-          <div class="grupo-search"><input type="text" placeholder="Buscar grupo..." id="grupo-search-input" oninput="filtrarOpcoes()"></div>
-          <div class="grupo-options" id="grupo-options"></div>
-          <div class="grupo-clear" onclick="limparGrupo()">Limpar filtro</div>
+    <!-- ══ FILTER BAR ══ -->
+    <div class="filter-bar">
+      <!-- Coordenador -->
+      <div>
+        <div class="filter-label">Coordenador</div>
+        <div class="filter-wrap" id="coord-wrap">
+          <button class="filter-select-btn" id="coord-btn" onclick="toggleFilter('coord')">
+            <span id="coord-btn-label">Todos os coordenadores</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="filter-dropdown" id="coord-dropdown">
+            <div class="filter-search"><input type="text" placeholder="Buscar coordenador..." id="coord-search-input" oninput="filtrarOpcoes('coord')"></div>
+            <div class="filter-options" id="coord-options"></div>
+            <div class="filter-clear" onclick="limparFiltro('coord')">Limpar filtro</div>
+          </div>
+        </div>
+      </div>
+      <!-- Responsável -->
+      <div>
+        <div class="filter-label">Responsável</div>
+        <div class="filter-wrap" id="resp-wrap">
+          <button class="filter-select-btn" id="resp-btn" onclick="toggleFilter('resp')">
+            <span id="resp-btn-label">Todos os responsáveis</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="filter-dropdown" id="resp-dropdown">
+            <div class="filter-search"><input type="text" placeholder="Buscar responsável..." id="resp-search-input" oninput="filtrarOpcoes('resp')"></div>
+            <div class="filter-options" id="resp-options"></div>
+            <div class="filter-clear" onclick="limparFiltro('resp')">Limpar filtro</div>
+          </div>
+        </div>
+      </div>
+      <!-- Grupo -->
+      <div>
+        <div class="filter-label">Grupo <span style="color:var(--muted);font-weight:400;letter-spacing:0;text-transform:none;font-size:10px">(opcional)</span></div>
+        <div class="filter-wrap" id="grupo-wrap">
+          <button class="filter-select-btn" id="grupo-btn" onclick="toggleFilter('grupo')">
+            <span id="grupo-btn-label">Todos os grupos</span>
+            <span class="arrow">▼</span>
+          </button>
+          <div class="filter-dropdown" id="grupo-dropdown">
+            <div class="filter-search"><input type="text" placeholder="Buscar grupo..." id="grupo-search-input" oninput="filtrarOpcoes('grupo')"></div>
+            <div class="filter-options" id="grupo-options"></div>
+            <div class="filter-clear" onclick="limparFiltro('grupo')">Limpar filtro</div>
+          </div>
         </div>
       </div>
     </div>
@@ -431,27 +575,48 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
         <button class="placar-export-btn" onclick="exportarPlacares('dep')">⬇ Baixar por departamento</button>
       </div>
       <div class="placares-grid" id="placares-grid">
-        <!-- dia -->
         <div class="placar-card pc-dia" id="pc-dia">
           <div class="pc-label">Baixas no Dia</div>
           <div class="pc-num" id="pc-dia-num">0</div>
           <div class="pc-sub">tarefas concluídas hoje</div>
           <div class="pc-deps" id="pc-dia-deps"></div>
         </div>
-        <!-- semana -->
         <div class="placar-card pc-sem" id="pc-sem">
           <div class="pc-label">Baixas na Semana</div>
           <div class="pc-num" id="pc-sem-num">0</div>
           <div class="pc-sub">desde segunda-feira</div>
           <div class="pc-deps" id="pc-sem-deps"></div>
         </div>
-        <!-- mês -->
         <div class="placar-card pc-mes" id="pc-mes">
           <div class="pc-label">Baixas no Mês</div>
           <div class="pc-num" id="pc-mes-num">0</div>
           <div class="pc-sub">acumulado do mês</div>
           <div class="pc-deps" id="pc-mes-deps"></div>
         </div>
+      </div>
+    </div>
+
+    <!-- Baixas por Funcionário -->
+    <div class="baixas-func-section" id="baixas-func-section" style="display:none">
+      <div class="baixas-func-title">Baixas por Funcionário</div>
+      <div class="baixas-func-periodo-tabs">
+        <button class="bf-tab ativo" id="bf-tab-dia" onclick="mudarBfTab('dia',this)">Dia</button>
+        <button class="bf-tab" id="bf-tab-sem" onclick="mudarBfTab('sem',this)">Semana</button>
+        <button class="bf-tab" id="bf-tab-mes" onclick="mudarBfTab('mes',this)">Mês</button>
+      </div>
+      <div class="bf-table-wrap">
+        <table class="bf-table">
+          <thead>
+            <tr>
+              <th>Funcionário</th>
+              <th>Coordenador</th>
+              <th>Departamento</th>
+              <th style="width:120px">Progresso</th>
+              <th>Baixas</th>
+            </tr>
+          </thead>
+          <tbody id="bf-tbody"></tbody>
+        </table>
       </div>
     </div>
 
@@ -485,41 +650,54 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 <script>
 const DATA = {{ man:{js_man}, fin:{js_fin}, add:{js_add} }};
 const MODO_COMP = {'true' if modo_comp else 'false'};
-const ARQ_BASE = {json.dumps(nome_base)};
+const ARQ_BASE  = {json.dumps(nome_base)};
 const ARQ_ATUAL = {json.dumps(nome_atual)};
-const GERADO = {json.dumps(gerado_em)};
-const PLACARES = {js_placares};
+const GERADO    = {json.dumps(gerado_em)};
+const PLACARES  = {js_placares};
+const ALL_COORDS = {js_all_coords};
 
-let filialAtual=null, depAtual=null, grupoAtual=null, abaAtual='man';
+let filialAtual=null, depAtual=null;
+let filtroCoord=null, filtroResp=null, filtroGrupo=null;
+let abaAtual='man', bfPeriodoAtual='dia';
 let chartMan=null, chartComp=null;
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+// ── Labels ───────────────────────────────────────────────────────────────────
 const LABELS = {{'SP':'São Paulo','Santos':'Santos','RJ':'Rio de Janeiro','GOIAS':'Goiás'}};
 function labelFilial(f){{ return LABELS[f]||f; }}
 
+// ── Data helpers ─────────────────────────────────────────────────────────────
 function getFiliais(){{
   return [...new Set([...DATA.man,...DATA.fin,...DATA.add].map(r=>r.unidade))].sort();
 }}
 function getDeps(filial){{
   return [...new Set([...DATA.man,...DATA.fin,...DATA.add].filter(r=>r.unidade===filial).map(r=>r.dep))].sort();
 }}
-function getGruposOrdenados(filial, dep){{
-  const rows = [...DATA.man,...DATA.fin,...DATA.add].filter(r=>r.unidade===filial&&r.dep===dep&&r.grupo);
-  const cnt={{}};
-  rows.forEach(r=>{{ cnt[r.grupo]=(cnt[r.grupo]||0)+1; }});
-  return Object.entries(cnt).sort((a,b)=>b[1]-a[1]).map(([g,c])=>{{return{{grupo:g,count:c}}}});
+function countIn(arr,filial,dep){{
+  return arr.filter(r=>r.unidade===filial&&r.dep===dep).length;
 }}
-function countIn(arr,filial,dep,grupo){{
-  return arr.filter(r=>r.unidade===filial&&r.dep===dep&&(!grupo||r.grupo===grupo)).length;
+
+/** Verifica se uma row passa pelo filtro de coordenador */
+function rowPassaCoord(r){{
+  if(!filtroCoord) return true;
+  if(!r.coord) return false;
+  return r.coord.split('|').map(s=>s.trim()).includes(filtroCoord);
 }}
+
+/** Verifica se uma row passa por todos os filtros ativos */
 function filtrar(arr){{
-  return arr.filter(r=>r.unidade===filialAtual&&r.dep===depAtual&&(!grupoAtual||r.grupo===grupoAtual));
+  return arr.filter(r =>
+    r.unidade === filialAtual &&
+    r.dep === depAtual &&
+    rowPassaCoord(r) &&
+    (!filtroResp  || r.resp  === filtroResp) &&
+    (!filtroGrupo || r.grupo === filtroGrupo)
+  );
 }}
 
 // ── Screens ──────────────────────────────────────────────────────────────────
 function showScreen(id){{document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));document.getElementById(id).classList.add('active');window.scrollTo(0,0);}}
 function voltarFilial(){{showScreen('screen-filial');filialAtual=null;depAtual=null;}}
-function voltarDep(){{showScreen('screen-dep');depAtual=null;grupoAtual=null;}}
+function voltarDep(){{showScreen('screen-dep');depAtual=null;filtroCoord=null;filtroResp=null;filtroGrupo=null;}}
 
 // ── Screen 1 ──────────────────────────────────────────────────────────────────
 function buildFiliais(){{
@@ -536,16 +714,16 @@ function buildFiliais(){{
 
 // ── Screen 2 ──────────────────────────────────────────────────────────────────
 function selecionarFilial(filial){{
-  filialAtual=filial; grupoAtual=null;
+  filialAtual=filial; filtroCoord=null; filtroResp=null; filtroGrupo=null;
   document.getElementById('dep-screen-title').textContent=labelFilial(filial);
   const deps=getDeps(filial);
   document.getElementById('dep-screen-sub').textContent=`${{deps.length}} departamentos`;
   const list=document.getElementById('dep-list');
   list.innerHTML='';
   deps.forEach(dep=>{{
-    const m=countIn(DATA.man,filial,dep,null);
-    const f=countIn(DATA.fin,filial,dep,null);
-    const a=countIn(DATA.add,filial,dep,null);
+    const m=countIn(DATA.man,filial,dep);
+    const f=countIn(DATA.fin,filial,dep);
+    const a=countIn(DATA.add,filial,dep);
     const el=document.createElement('div');
     el.className='dep-item';
     el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-add">${{a}}</span>`:''}}</div>`;
@@ -557,8 +735,8 @@ function selecionarFilial(filial){{
 
 // ── Screen 3 ──────────────────────────────────────────────────────────────────
 function selecionarDep(dep){{
-  depAtual=dep; grupoAtual=null;
-  abaAtual='man';
+  depAtual=dep; filtroCoord=null; filtroResp=null; filtroGrupo=null;
+  abaAtual='man'; bfPeriodoAtual='dia';
   document.getElementById('rh-title').innerHTML=`<em>${{labelFilial(filialAtual)}}</em> · ${{dep}}`;
   document.getElementById('rh-meta-base').textContent=`Base: ${{ARQ_BASE}}`;
   document.getElementById('rh-meta-atual').textContent=MODO_COMP?`Atual: ${{ARQ_ATUAL}} · Gerado em: ${{GERADO}}`:`Gerado em: ${{GERADO}}`;
@@ -566,64 +744,174 @@ function selecionarDep(dep){{
   document.getElementById('tbtn-man').classList.add('ativo');
   document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('ativo'));
   document.getElementById('tab-man').classList.add('ativo');
-  buildDropdown();
+  // Reset bf tabs
+  document.querySelectorAll('.bf-tab').forEach(b=>b.classList.remove('ativo'));
+  document.getElementById('bf-tab-dia').classList.add('ativo');
+
+  buildAllDropdowns();
   renderAll();
   renderCharts();
-  renderPlacares(filialAtual, dep);
+  renderPlacares();
+  renderBaixasFunc();
   showScreen('screen-results');
 }}
 
-// ── Grupo Dropdown ────────────────────────────────────────────────────────────
-let gruposData=[];
-function buildDropdown(){{
-  gruposData=getGruposOrdenados(filialAtual,depAtual);
-  renderOpcoes('');
+// ══════════════════════════════════════════════════════════════════════════════
+// ── GENERIC DROPDOWN SYSTEM ───────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+
+/** Constrói as opções para cada filtro baseado nos dados filtrados pelos outros filtros */
+function getOpcoesFiltro(tipo){{
+  // Dados do dep atual (sem aplicar o próprio filtro desse tipo)
+  const all = [...DATA.man,...DATA.fin,...DATA.add].filter(r => r.unidade===filialAtual && r.dep===depAtual);
+
+  if(tipo==='coord'){{
+    // Todos os coordenadores presentes nos dados do dep
+    const cnt={{}};
+    all.forEach(r=>{{
+      const coords = r.coord ? r.coord.split('|').map(s=>s.trim()).filter(Boolean) : [];
+      // Também mostrar "Sem coordenador" se não tiver coord
+      if(!coords.length){{ cnt['']=(cnt['']||0)+1; return; }}
+      coords.forEach(c=>{{ cnt[c]=(cnt[c]||0)+1; }});
+    }});
+    return Object.entries(cnt)
+      .filter(([k])=>k) // só coordenadores com nome
+      .sort((a,b)=>b[1]-a[1])
+      .map(([k,v])=>{{return{{valor:k,label:k,count:v}}}});
+  }}
+
+  if(tipo==='resp'){{
+    // Responsáveis que pertencem ao coordenador selecionado (se houver)
+    const filtrados = filtroCoord
+      ? all.filter(r=>r.coord && r.coord.split('|').map(s=>s.trim()).includes(filtroCoord))
+      : all;
+    const cnt={{}};
+    filtrados.forEach(r=>{{ if(r.resp) cnt[r.resp]=(cnt[r.resp]||0)+1; }});
+    return Object.entries(cnt)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([k,v])=>{{return{{valor:k,label:k,count:v}}}});
+  }}
+
+  if(tipo==='grupo'){{
+    // Grupos filtrados pelos filtros de coord e resp ativos
+    const filtrados = all.filter(r=>
+      rowPassaCoord(r) &&
+      (!filtroResp || r.resp===filtroResp)
+    );
+    const cnt={{}};
+    filtrados.forEach(r=>{{ if(r.grupo) cnt[r.grupo]=(cnt[r.grupo]||0)+1; }});
+    return Object.entries(cnt)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([k,v])=>{{return{{valor:k,label:k,count:v}}}});
+  }}
+  return [];
 }}
-function renderOpcoes(busca){{
-  const el=document.getElementById('grupo-options');
+
+function buildAllDropdowns(){{
+  renderDropdownOpcoes('coord','');
+  renderDropdownOpcoes('resp','');
+  renderDropdownOpcoes('grupo','');
+  atualizarBotaoFiltro('coord', filtroCoord, 'Todos os coordenadores');
+  atualizarBotaoFiltro('resp',  filtroResp,  'Todos os responsáveis');
+  atualizarBotaoFiltro('grupo', filtroGrupo, 'Todos os grupos');
+}}
+
+function renderDropdownOpcoes(tipo, busca){{
+  const el=document.getElementById(`${{tipo}}-options`);
+  const opcoes=getOpcoesFiltro(tipo);
+  const valorAtual = tipo==='coord'?filtroCoord : tipo==='resp'?filtroResp : filtroGrupo;
+  const filtradas = busca ? opcoes.filter(o=>o.label.toLowerCase().includes(busca.toLowerCase())) : opcoes;
+  if(!filtradas.length){{
+    el.innerHTML='<div class="filter-opt" style="color:var(--muted);justify-content:center;cursor:default">Nenhuma opção</div>';
+    return;
+  }}
   el.innerHTML='';
-  const filtrados=busca?gruposData.filter(g=>g.grupo.toLowerCase().includes(busca.toLowerCase())):gruposData;
-  filtrados.forEach(g=>{{
+  filtradas.forEach(o=>{{
     const opt=document.createElement('div');
-    opt.className='grupo-opt'+(grupoAtual===g.grupo?' sel':'');
-    opt.innerHTML=`<span class="grupo-opt-name">${{g.grupo}}</span><span class="grupo-opt-count">${{g.count}}</span>`;
-    opt.onclick=()=>selecionarGrupo(g.grupo);
+    opt.className='filter-opt'+(valorAtual===o.valor?' sel':'');
+    opt.innerHTML=`<span class="filter-opt-name">${{o.label}}</span><span class="filter-opt-count">${{o.count}}</span>`;
+    opt.onclick=()=>selecionarFiltro(tipo,o.valor,o.label);
     el.appendChild(opt);
   }});
 }}
-function filtrarOpcoes(){{
-  renderOpcoes(document.getElementById('grupo-search-input').value);
+
+function filtrarOpcoes(tipo){{
+  const busca=document.getElementById(`${{tipo}}-search-input`).value;
+  renderDropdownOpcoes(tipo,busca);
 }}
-function toggleDropdown(){{
-  const btn=document.getElementById('grupo-btn');
-  const dd=document.getElementById('grupo-dropdown');
+
+function toggleFilter(tipo){{
+  const btn=document.getElementById(`${{tipo}}-btn`);
+  const dd=document.getElementById(`${{tipo}}-dropdown`);
   const open=dd.classList.toggle('open');
   btn.classList.toggle('open',open);
-  if(open){{ document.getElementById('grupo-search-input').value=''; renderOpcoes(''); setTimeout(()=>document.getElementById('grupo-search-input').focus(),50); }}
-}}
-function selecionarGrupo(g){{
-  grupoAtual=g;
-  document.getElementById('grupo-btn-label').textContent=g;
-  document.getElementById('grupo-dropdown').classList.remove('open');
-  document.getElementById('grupo-btn').classList.remove('open');
-  renderAll(); renderCharts();
-}}
-function limparGrupo(){{
-  grupoAtual=null;
-  document.getElementById('grupo-btn-label').textContent='Todos os grupos';
-  document.getElementById('grupo-dropdown').classList.remove('open');
-  document.getElementById('grupo-btn').classList.remove('open');
-  renderAll(); renderCharts();
-}}
-document.addEventListener('click',e=>{{
-  const wrap=document.getElementById('grupo-wrap');
-  if(wrap&&!wrap.contains(e.target)){{
-    document.getElementById('grupo-dropdown').classList.remove('open');
-    document.getElementById('grupo-btn').classList.remove('open');
+  if(open){{
+    document.getElementById(`${{tipo}}-search-input`).value='';
+    renderDropdownOpcoes(tipo,'');
+    setTimeout(()=>document.getElementById(`${{tipo}}-search-input`).focus(),50);
   }}
+}}
+
+function fecharTodosDropdowns(){{
+  ['coord','resp','grupo'].forEach(t=>{{
+    document.getElementById(`${{t}}-dropdown`).classList.remove('open');
+    document.getElementById(`${{t}}-btn`).classList.remove('open');
+  }});
+}}
+
+function atualizarBotaoFiltro(tipo, valor, placeholder){{
+  document.getElementById(`${{tipo}}-btn-label`).textContent = valor || placeholder;
+}}
+
+function selecionarFiltro(tipo, valor, label){{
+  if(tipo==='coord'){{
+    filtroCoord=valor;
+    filtroResp=null;  // reset responsavel ao mudar coordenador
+    atualizarBotaoFiltro('coord', valor, 'Todos os coordenadores');
+    atualizarBotaoFiltro('resp', null, 'Todos os responsáveis');
+    renderDropdownOpcoes('resp','');
+    renderDropdownOpcoes('grupo','');
+  }} else if(tipo==='resp'){{
+    filtroResp=valor;
+    atualizarBotaoFiltro('resp', valor, 'Todos os responsáveis');
+    renderDropdownOpcoes('grupo','');
+  }} else {{
+    filtroGrupo=valor;
+    atualizarBotaoFiltro('grupo', valor, 'Todos os grupos');
+  }}
+  fecharTodosDropdowns();
+  renderAll(); renderCharts(); renderPlacares(); renderBaixasFunc();
+}}
+
+function limparFiltro(tipo){{
+  if(tipo==='coord'){{
+    filtroCoord=null; filtroResp=null; filtroGrupo=null;
+    atualizarBotaoFiltro('coord', null, 'Todos os coordenadores');
+    atualizarBotaoFiltro('resp',  null, 'Todos os responsáveis');
+    atualizarBotaoFiltro('grupo', null, 'Todos os grupos');
+    renderDropdownOpcoes('resp','');
+    renderDropdownOpcoes('grupo','');
+  }} else if(tipo==='resp'){{
+    filtroResp=null; filtroGrupo=null;
+    atualizarBotaoFiltro('resp',  null, 'Todos os responsáveis');
+    atualizarBotaoFiltro('grupo', null, 'Todos os grupos');
+    renderDropdownOpcoes('grupo','');
+  }} else {{
+    filtroGrupo=null;
+    atualizarBotaoFiltro('grupo', null, 'Todos os grupos');
+  }}
+  fecharTodosDropdowns();
+  renderAll(); renderCharts(); renderPlacares(); renderBaixasFunc();
+}}
+
+// Fecha dropdown ao clicar fora
+document.addEventListener('click',e=>{{
+  const wraps=['coord-wrap','resp-wrap','grupo-wrap'];
+  const inside=wraps.some(id=>{{const el=document.getElementById(id);return el&&el.contains(e.target);}});
+  if(!inside) fecharTodosDropdowns();
 }});
 
-// ── Render Table ──────────────────────────────────────────────────────────────
+// ── Render Tables ─────────────────────────────────────────────────────────────
 function renderAll(){{
   const m=filtrar(DATA.man), f=filtrar(DATA.fin), a=filtrar(DATA.add);
   ['man','fin','add'].forEach((k,i)=>{{
@@ -693,24 +981,15 @@ function renderCharts(){{
   const finCounts=deps.map(d=>f.filter(r=>r.dep===d).length);
   const addCounts=deps.map(d=>a.filter(r=>r.dep===d).length);
 
-  // Chart 1: Em Andamento por dep (horizontal bar)
   const ctx1=document.getElementById('chart-man').getContext('2d');
   chartMan=new Chart(ctx1,{{
     type:'bar',
     data:{{
       labels:deps.map(shortDep),
-      datasets:[{{
-        label:'Em Andamento',
-        data:manCounts,
-        backgroundColor:'rgba(227,30,36,.7)',
-        borderColor:'#E31E24',
-        borderWidth:1,
-        borderRadius:4,
-      }}]
+      datasets:[{{label:'Em Andamento',data:manCounts,backgroundColor:'rgba(227,30,36,.7)',borderColor:'#E31E24',borderWidth:1,borderRadius:4}}]
     }},
     options:{{
-      indexAxis:'y',
-      responsive:true,maintainAspectRatio:false,
+      indexAxis:'y',responsive:true,maintainAspectRatio:false,
       plugins:{{legend:{{display:false}},tooltip:{{callbacks:{{title:i=>deps[i[0].dataIndex]}}}}}},
       scales:{{
         x:{{grid:{{color:'rgba(255,255,255,.05)'}},ticks:{{color:'#666',font:{{size:11}}}}}},
@@ -719,7 +998,6 @@ function renderCharts(){{
     }}
   }});
 
-  // Chart 2: Baixadas vs Adicionadas (grouped bar) — only in comparison mode
   const ctx2=document.getElementById('chart-compare').getContext('2d');
   if(MODO_COMP && (f.length||a.length)){{
     chartComp=new Chart(ctx2,{{
@@ -741,18 +1019,13 @@ function renderCharts(){{
       }}
     }});
   }} else {{
-    // No comparison: show distribution donut
     const total=manCounts.reduce((a,b)=>a+b,0);
     if(total>0){{
       chartComp=new Chart(ctx2,{{
         type:'doughnut',
         data:{{
           labels:deps.map(shortDep),
-          datasets:[{{
-            data:manCounts,
-            backgroundColor:deps.map((_,i)=>`hsl(${{(i*47+5)%360}},60%,50%)`),
-            borderColor:'#111',borderWidth:2
-          }}]
+          datasets:[{{data:manCounts,backgroundColor:deps.map((_,i)=>`hsl(${{(i*47+5)%360}},60%,50%)`),borderColor:'#111',borderWidth:2}}]
         }},
         options:{{
           responsive:true,maintainAspectRatio:false,
@@ -767,126 +1040,117 @@ function renderCharts(){{
 }}
 
 // ── Placares de Baixas ───────────────────────────────────────────────────────
-function renderPlacares(filial, dep){{
-  const sec = document.getElementById('placares-section');
-  const periodos = ['dia','sem','mes'];
-  const temDados = periodos.some(p => PLACARES[p] && PLACARES[p].total > 0);
-  if(!PLACARES || Object.keys(PLACARES).length === 0){{ sec.style.display='none'; return; }}
-  sec.style.display = 'block';
+function renderPlacares(){{
+  const sec=document.getElementById('placares-section');
+  if(!PLACARES||Object.keys(PLACARES).length===0){{sec.style.display='none';return;}}
+  sec.style.display='block';
 
-  periodos.forEach(p => {{
-    const pd = PLACARES[p] || {{total:0, por_dep:[]}};
-    // filtra pelo dep/filial atual
-    const filtrados = pd.por_dep.filter(r => r.unidade === filial && r.dep === dep);
-    const total_dep = filtrados.reduce((a,b)=>a+b.n, 0);
-    document.getElementById(`pc-${{p}}-num`).textContent = total_dep;
-
-    const container = document.getElementById(`pc-${{p}}-deps`);
-    if(!filtrados.length){{
-      container.innerHTML = '<div class="pc-empty">Nenhuma baixa neste departamento</div>';
-      return;
-    }}
-    const max_n = Math.max(...filtrados.map(r=>r.n), 1);
-    container.innerHTML = filtrados.map(r => {{
-      const pct = Math.round(r.n / max_n * 100);
-      return `<div class="pc-dep-row">
-        <span class="pc-dep-name" title="${{r.dep}}">${{r.dep}}</span>
-        <span class="pc-dep-n">${{r.n}}</span>
-      </div>
-      <div class="pc-bar-wrap"><div class="pc-bar" style="width:${{pct}}%"></div></div>`;
+  ['dia','sem','mes'].forEach(p=>{{
+    const pd=PLACARES[p]||{{total:0,por_dep:[]}};
+    // Filtra por dep atual e pelos filtros ativos
+    let filtrados=pd.por_dep.filter(r=>r.unidade===filialAtual&&r.dep===depAtual);
+    const total_dep=filtrados.reduce((a,b)=>a+b.n,0);
+    document.getElementById(`pc-${{p}}-num`).textContent=total_dep;
+    const container=document.getElementById(`pc-${{p}}-deps`);
+    if(!filtrados.length){{container.innerHTML='<div class="pc-empty">Nenhuma baixa neste departamento</div>';return;}}
+    const max_n=Math.max(...filtrados.map(r=>r.n),1);
+    container.innerHTML=filtrados.map(r=>{{
+      const pct=Math.round(r.n/max_n*100);
+      return `<div class="pc-dep-row"><span class="pc-dep-name" title="${{r.dep}}">${{r.dep}}</span><span class="pc-dep-n">${{r.n}}</span></div><div class="pc-bar-wrap"><div class="pc-bar" style="width:${{pct}}%"></div></div>`;
     }}).join('');
   }});
 }}
 
-// ── Export Placares ───────────────────────────────────────────────────────────
-async function exportarPlacares(modo){{
-  // Mostrar overlay
-  const overlay = document.createElement('div');
-  overlay.className = 'capture-overlay';
-  overlay.innerHTML = '<div class="capture-spinner"></div><span style="color:#aaa;font-size:13px">Gerando imagem...</span>';
-  document.body.appendChild(overlay);
+// ── Baixas por Funcionário ────────────────────────────────────────────────────
+function renderBaixasFunc(){{
+  const sec=document.getElementById('baixas-func-section');
+  if(!PLACARES||Object.keys(PLACARES).length===0){{sec.style.display='none';return;}}
 
-  await new Promise(r=>setTimeout(r, 100));
+  const pd=PLACARES[bfPeriodoAtual]||{{total:0,por_resp:[]}};
+  // Filtra por unidade, dep, e filtros ativos
+  let rows=pd.por_resp.filter(r=>
+    r.unidade===filialAtual &&
+    r.dep===depAtual &&
+    (!filtroCoord || r.coord.split('|').map(s=>s.trim()).includes(filtroCoord)) &&
+    (!filtroResp  || r.resp===filtroResp)
+  );
 
-  try {{
-    if(modo === 'geral'){{
-      // Captura o bloco completo dos 3 placares
-      const el = document.getElementById('placares-grid');
-      const canvas = await html2canvas(el, {{
-        backgroundColor: '#111111',
-        scale: 2,
-        useCORS: true,
-        logging: false,
-      }});
-      _downloadCanvas(canvas, `placares_geral_${{depAtual || 'todos'}}.png`);
-    }} else {{
-      // Captura por departamento: gera uma imagem por período com detalhe
-      const periodos = [
-        {{id:'pc-dia', label:'Baixas no Dia'}},
-        {{id:'pc-sem', label:'Baixas na Semana'}},
-        {{id:'pc-mes', label:'Baixas no Mês'}},
-      ];
-
-      // Criar canvas composto manualmente para ter cabeçalho
-      const tmpCanvas = document.createElement('canvas');
-      const cards = periodos.map(p => document.getElementById(p.id));
-
-      // Captura cada card
-      const capturas = await Promise.all(
-        cards.map(card => html2canvas(card, {{
-          backgroundColor: '#111111',
-          scale: 2,
-          useCORS: true,
-          logging: false,
-        }}))
-      );
-
-      // Monta canvas final lado a lado com margem e cabeçalho
-      const pad = 24;
-      const headerH = 60;
-      const totalW = capturas.reduce((a,c)=>a+c.width,0) + pad*(capturas.length+1);
-      const maxH = Math.max(...capturas.map(c=>c.height));
-      const totalH = maxH + pad*2 + headerH;
-
-      tmpCanvas.width = totalW;
-      tmpCanvas.height = totalH;
-      const ctx = tmpCanvas.getContext('2d');
-
-      // Fundo
-      ctx.fillStyle = '#0a0a0a';
-      ctx.fillRect(0,0,totalW,totalH);
-
-      // Cabeçalho
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 28px Inter, sans-serif';
-      ctx.fillText('MG Contécnica · Placar de Baixas', pad, 38);
-      ctx.fillStyle = '#666';
-      ctx.font = '20px Inter, sans-serif';
-      const subtitle = `${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{GERADO}}`;
-      ctx.fillText(subtitle, pad, 62);
-
-      // Cards
-      let x = pad;
-      capturas.forEach(c => {{
-        ctx.drawImage(c, x, headerH + pad);
-        x += c.width + pad;
-      }});
-
-      _downloadCanvas(tmpCanvas, `placares_dep_${{depAtual || 'todos'}}.png`);
-    }}
-  }} catch(e){{
-    console.error('Erro ao exportar:', e);
-    alert('Erro ao gerar imagem. Verifique o console.');
-  }} finally {{
-    document.body.removeChild(overlay);
+  if(!rows.length){{
+    sec.style.display='none';
+    return;
   }}
+  sec.style.display='block';
+
+  const maxN=Math.max(...rows.map(r=>r.n),1);
+
+  // Agrupa por departamento
+  const porDep={{}};
+  rows.forEach(r=>{{
+    if(!porDep[r.dep]) porDep[r.dep]=[];
+    porDep[r.dep].push(r);
+  }});
+
+  let html='';
+  Object.keys(porDep).sort().forEach(dep=>{{
+    html+=`<tr class="bf-dep-row"><td colspan="5">${{dep}}</td></tr>`;
+    porDep[dep].forEach(r=>{{
+      const pct=Math.round(r.n/maxN*100);
+      const coordLabel=r.coord?r.coord.split('|').map(s=>s.trim()).join(', '):'—';
+      html+=`<tr>
+        <td><span class="bf-resp-name">${{r.resp||'—'}}</span></td>
+        <td><span class="bf-coord-badge">${{coordLabel}}</span></td>
+        <td style="font-size:12px;color:var(--muted)">${{r.dep}}</td>
+        <td class="bf-bar-cell"><div class="bf-bar-bg"><div class="bf-bar-fill" style="width:${{pct}}%"></div></div></td>
+        <td><span class="bf-num">${{r.n}}</span></td>
+      </tr>`;
+    }});
+  }});
+
+  document.getElementById('bf-tbody').innerHTML=html;
 }}
 
-function _downloadCanvas(canvas, filename){{
-  const link = document.createElement('a');
-  link.download = filename;
-  link.href = canvas.toDataURL('image/png');
-  link.click();
+function mudarBfTab(periodo,btn){{
+  bfPeriodoAtual=periodo;
+  document.querySelectorAll('.bf-tab').forEach(b=>b.classList.remove('ativo'));
+  btn.classList.add('ativo');
+  renderBaixasFunc();
+}}
+
+// ── Export Placares ───────────────────────────────────────────────────────────
+async function exportarPlacares(modo){{
+  const overlay=document.createElement('div');
+  overlay.className='capture-overlay';
+  overlay.innerHTML='<div class="capture-spinner"></div><span style="color:#aaa;font-size:13px">Gerando imagem...</span>';
+  document.body.appendChild(overlay);
+  await new Promise(r=>setTimeout(r,100));
+  try{{
+    if(modo==='geral'){{
+      const el=document.getElementById('placares-grid');
+      const canvas=await html2canvas(el,{{backgroundColor:'#111111',scale:2,useCORS:true,logging:false}});
+      _downloadCanvas(canvas,`placares_geral_${{depAtual||'todos'}}.png`);
+    }} else {{
+      const periodos=[{{id:'pc-dia',label:'Baixas no Dia'}},{{id:'pc-sem',label:'Baixas na Semana'}},{{id:'pc-mes',label:'Baixas no Mês'}}];
+      const capturas=await Promise.all(periodos.map(p=>html2canvas(document.getElementById(p.id),{{backgroundColor:'#111111',scale:2,useCORS:true,logging:false}})));
+      const pad=24,headerH=60;
+      const totalW=capturas.reduce((a,c)=>a+c.width,0)+pad*(capturas.length+1);
+      const maxH=Math.max(...capturas.map(c=>c.height));
+      const tmpCanvas=document.createElement('canvas');
+      tmpCanvas.width=totalW; tmpCanvas.height=maxH+pad*2+headerH;
+      const ctx=tmpCanvas.getContext('2d');
+      ctx.fillStyle='#0a0a0a'; ctx.fillRect(0,0,tmpCanvas.width,tmpCanvas.height);
+      ctx.fillStyle='#ffffff'; ctx.font='bold 28px Inter,sans-serif';
+      ctx.fillText('MG Contécnica · Placar de Baixas',pad,38);
+      ctx.fillStyle='#666'; ctx.font='20px Inter,sans-serif';
+      ctx.fillText(`${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{GERADO}}`,pad,62);
+      let x=pad;
+      capturas.forEach(c=>{{ctx.drawImage(c,x,headerH+pad);x+=c.width+pad;}});
+      _downloadCanvas(tmpCanvas,`placares_dep_${{depAtual||'todos'}}.png`);
+    }}
+  }}catch(e){{console.error('Erro ao exportar:',e);alert('Erro ao gerar imagem.');}}
+  finally{{document.body.removeChild(overlay);}}
+}}
+function _downloadCanvas(canvas,filename){{
+  const link=document.createElement('a');link.download=filename;link.href=canvas.toDataURL('image/png');link.click();
 }}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
@@ -900,21 +1164,27 @@ def main():
     parser.add_argument("base")
     parser.add_argument("atual", nargs="?", default=None)
     parser.add_argument("-o","--output", default=None)
-    parser.add_argument("--base-dia", default=None, dest="base_dia",
-                        help="Primeiro arquivo do mesmo dia (para placar diário)")
-    parser.add_argument("--base-sem", default=None, dest="base_sem",
-                        help="Primeiro arquivo da semana (para placar semanal)")
-    parser.add_argument("--base-mes", default=None, dest="base_mes",
-                        help="Primeiro arquivo do mês (para placar mensal)")
+    parser.add_argument("--base-dia",  default=None, dest="base_dia")
+    parser.add_argument("--base-sem",  default=None, dest="base_sem")
+    parser.add_argument("--base-mes",  default=None, dest="base_mes")
+    parser.add_argument("--coordenadores", default=None, dest="coordenadores",
+                        help="Caminho para a planilha de coordenadores (ex: coordenadores.xlsx)")
     args = parser.parse_args()
 
+    # ── Carrega mapeamento de coordenadores ──────────────────────────────────
+    resp_to_coords, all_coords = carregar_coordenadores(args.coordenadores)
+    if args.coordenadores:
+        print(f"[*] Coordenadores carregados: {len(all_coords)} coordenadores, {len(resp_to_coords)} responsáveis mapeados.")
+    else:
+        print("[!] Planilha de coordenadores não informada. Filtro de coordenador estará vazio.")
+
     print(f"[*] Lendo base: {args.base}")
-    df_base = ler_relatorio(args.base)
+    df_base = ler_relatorio(args.base, resp_to_coords)
     print(f"    {len(df_base)} tarefas.")
 
     if args.atual:
         print(f"[*] Lendo atual: {args.atual}")
-        df_atual = ler_relatorio(args.atual)
+        df_atual = ler_relatorio(args.atual, resp_to_coords)
         print(f"    {len(df_atual)} tarefas.")
         em_andamento, finalizadas, adicionadas = comparar(df_base, df_atual)
     else:
@@ -926,12 +1196,11 @@ def main():
 
     print(f"[*] Man:{len(em_andamento)} Fin:{len(finalizadas)} Add:{len(adicionadas)}")
 
-    # ── Calcular placares ────────────────────────────────────────────────
     def ler_ou_none(caminho):
         if not caminho:
             return None
         try:
-            df = ler_relatorio(caminho)
+            df = ler_relatorio(caminho, resp_to_coords)
             print(f"[*] Placar base '{os.path.basename(caminho)}': {len(df)} tarefas.")
             return df
         except Exception as e:
@@ -946,7 +1215,7 @@ def main():
     print(f"[*] Placares — Dia:{placares['dia']['total']} Sem:{placares['sem']['total']} Mês:{placares['mes']['total']}")
 
     html = gerar_html(args.base, args.atual, em_andamento, finalizadas, adicionadas,
-                      placares=placares)
+                      placares=placares, all_coords=all_coords or None)
 
     out = args.output or f"Relatorio_Pendencias_{datetime.now().strftime('%d-%m-%y_%H%M%S')}.html"
     with open(out,"w",encoding="utf-8") as f:
