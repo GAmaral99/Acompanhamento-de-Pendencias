@@ -28,7 +28,7 @@ def formatar_data(valor):
     if pd.isna(valor) or str(valor).strip() in ("", "nan", "NaT", "None"):
         return ""
     try:
-        v = pd.to_datetime(valor, errors="coerce")
+        v = pd.to_datetime(valor, dayfirst=True, errors="coerce")
         return v.strftime("%d/%m/%Y") if not pd.isna(v) else str(valor).strip()
     except:
         return str(valor).strip()
@@ -683,8 +683,7 @@ function selecionarFilial(filial){{
     const a=countIn(DATA.add,filial,dep);
     const el=document.createElement('div');
     el.className='dep-item';
-    el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-add">${{a}}</span>`:''}}</div>`;
-    el.onclick=()=>selecionarDep(dep);
+    el.innerHTML=`<span class="dep-item-name">${{dep}}</span><div class="dep-pills"><span class="dp dp-man">${{m}}</span>${{MODO_COMP?`<span class="dp dp-fin">${{f}}</span><span class="dp dp-add">${{a}}</span>`:''}}</div>`;    el.onclick=()=>selecionarDep(dep);
     list.appendChild(el);
   }});
   showScreen('screen-dep');
@@ -922,9 +921,14 @@ function renderPlacares(){{
   }});
   sec.style.display = temDados ? 'block' : 'none';
 
+ // DEPOIS:
   ['dia','sem','mes'].forEach(p=>{{
     const pd=PLACARES[p]||{{total:0,por_dep:[]}};
-    const filtrados=pd.por_dep.filter(r=>r.unidade===filialAtual&&r.dep===depAtual);
+    const filtrados=pd.por_dep.filter(r=>
+      r.unidade===filialAtual &&
+      r.dep===depAtual
+      // por_dep não tem resp/grupo granular, filtro aplicado na tabela abaixo
+    );
     const total_dep=filtrados.reduce((a,b)=>a+b.n,0);
     document.getElementById(`pc-${{p}}-num`).textContent=total_dep;
     const container=document.getElementById(`pc-${{p}}-deps`);
@@ -942,20 +946,7 @@ function renderBaixasFunc(){{
   const sec=document.getElementById('baixas-func-section');
   if(!PLACARES||Object.keys(PLACARES).length===0){{sec.style.display='none';return;}}
 
-  // Verifica se há dados em qualquer período para este dep
-  const temDados = ['dia','sem','mes'].some(p=>{{
-    const pd=PLACARES[p]||{{por_resp:[]}};
-    return pd.por_resp.some(r=>
-      r.unidade===filialAtual &&
-      r.dep===depAtual &&
-      (!filtroCoord || (r.coord||'').split('|').map(s=>s.trim()).includes(filtroCoord)) &&
-      (!filtroResp  || r.resp===filtroResp)
-    );
-  }});
-
-  // Sempre mostra a seção se houver dados em qualquer período
-  sec.style.display = temDados ? 'block' : 'none';
-  if(!temDados) return;
+  sec.style.display = 'block';
 
   const pd=PLACARES[bfPeriodoAtual]||{{total:0,por_resp:[]}};
   const rows=pd.por_resp.filter(r=>
