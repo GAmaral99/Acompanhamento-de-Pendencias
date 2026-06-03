@@ -208,7 +208,7 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
     else:
         # Derive from data if no external list provided
         coords_set = set()
-        for df in [em_andamento, finalizadas, adicionadas]:
+        for df in [em_andamento, finalizadas, reabertas]:
             if not df.empty and "Coordenador" in df.columns:
                 for val in df["Coordenador"].dropna():
                     for c in str(val).split("|"):
