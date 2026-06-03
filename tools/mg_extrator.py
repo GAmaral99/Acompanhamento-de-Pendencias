@@ -520,7 +520,7 @@ def executar():
                 ) as pg:
                     t2 = pg.add_task("[cyan]Sincronizando com GitHub...", total=None)
                     pg.update(t2, description="[cyan]Baixando atualizações remotas (pull)...")
-                    subprocess.run(["git", "-C", repo_dir, "pull", "--rebase"],
+                    subprocess.run(["git", "-C", repo_dir, "pull", "--rebase", "--autostash"],
                                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     pg.update(t2, description="[cyan]Adicionando arquivo...")
                     subprocess.run(["git", "-C", repo_dir, "add", "data/"], check=True,
