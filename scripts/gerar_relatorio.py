@@ -626,10 +626,18 @@ function labelFilial(f){{ return LABELS[f]||f; }}
 
 // ── Data helpers ──────────────────────────────────────────────────────────────
 function getFiliais(){{
-  return [...new Set([...DATA.man,...DATA.fin,...DATA.add].map(r=>r.unidade))].sort();
+  const ocultas = ['RJ', 'Santos'];
+  return [...new Set([...DATA.man,...DATA.fin,...DATA.add].map(r=>r.unidade))]
+    .filter(f => !ocultas.includes(f))
+    .sort();
 }}
 function getDeps(filial){{
-  return [...new Set([...DATA.man,...DATA.fin,...DATA.add].filter(r=>r.unidade===filial).map(r=>r.dep))].sort();
+  const ocultos = ['FIN CONTÁBIL','MG CONTABIL FACIL','MG EXPRESS','RH ADM','S.A.C','SANTOS DP'];
+  return [...new Set([...DATA.man,...DATA.fin,...DATA.add]
+    .filter(r=>r.unidade===filial)
+    .map(r=>r.dep))]
+    .filter(d => !ocultos.includes(d.toUpperCase()))
+    .sort();
 }}
 function countIn(arr,filial,dep){{
   return arr.filter(r=>r.unidade===filial&&r.dep===dep).length;
