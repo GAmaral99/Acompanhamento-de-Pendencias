@@ -120,7 +120,7 @@ def main():
     print(f"[*] BASE SEM : {arq_sem.name}   ({dt_sem.strftime('%d/%m/%Y %H:%M')})")
     print(f"[*] BASE MÊS : {arq_mes.name}   ({dt_mes.strftime('%d/%m/%Y %H:%M')})")
     
-    COORD_XLSX = r"C:\Users\gamaral\Desktop\repo\data\coordenadores\Coordenadores (SP-RJ-Santos).xlsx"   
+    COORD_XLSX = str(Path("data/coordenadores/Coordenadores (SP-RJ-Santos).xlsx"))   
     cmd = [
         sys.executable, str(SCRIPT),
         str(arq_mes),    # base principal (mês) — mantém compatibilidade
