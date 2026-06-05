@@ -65,7 +65,7 @@ USUARIO = "gamaral"
 SENHA   = "mg@2026*"
 
 PASTA_BASE      = r"C:\Users\gamaral\Desktop\Relatorios Diarios"
-PASTA_REPO_DATA = r"C:\Users\gamaral\Desktop\repo\data"
+PASTA_REPO_DATA = r"C:\Users\gamaral\Desktop\Python\repo\data"
 
 TIMEOUT = 40
 
@@ -510,7 +510,7 @@ def executar():
             console.print()
             console.rule("[bold cyan]Publicando no GitHub[/bold cyan]")
             console.print()
-            repo_dir = r"C:\Users\gamaral\Desktop\repo"
+            repo_dir = r"C:\Users\gamaral\Desktop\Python\repo"
             try:
                 with Progress(
                     SpinnerColumn(style="cyan"),
