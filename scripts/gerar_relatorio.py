@@ -540,6 +540,13 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
           </div>
         </div>
       </div>
+      <div style="align-self:flex-end">
+        <div class="filter-label">&nbsp;</div>
+        <button id="btn-vencidas" onclick="toggleVencidas()"
+           style="background:var(--surface);border:1px solid var(--border);color:var(--muted);font-family:var(--font);font-size:13px;font-weight:600;padding:9px 18px;border-radius:8px;cursor:pointer;transition:all .18s;white-space:nowrap">
+          ⚠ Somente Vencidas
+         </button>
+        </div>
     </div>
 
     <!-- Placares de Baixas -->
@@ -618,6 +625,7 @@ const ALL_COORDS = {js_all_coords};
 
 let filialAtual=null, depAtual=null;
 let filtroCoord=null, filtroResp=null, filtroGrupo=null;
+let filtroVencidas=false;
 let abaAtual='man', bfPeriodoAtual='dia';
 
 // ── Labels ────────────────────────────────────────────────────────────────────
@@ -649,14 +657,26 @@ function rowPassaCoord(r){{
   return r.coord.split('|').map(s=>s.trim()).includes(filtroCoord);
 }}
 
-function filtrar(arr){{
-  return arr.filter(r =>
-    r.unidade === filialAtual &&
-    r.dep === depAtual &&
-    rowPassaCoord(r) &&
-    (!filtroResp  || r.resp  === filtroResp) &&
-    (!filtroGrupo || r.grupo === filtroGrupo)
-  );
+function parseDateBR(str){{
+  if(!str) return null;
+  const p=str.trim().split('/');
+  if(p.length!==3) return null;
+  return new Date(+p[2],+p[1]-1,+p[0]);
+}}
+
+function filtrar(arr, aplicarVencidas=false){{
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  return arr.filter(r=>{{
+    if(r.unidade!==filialAtual||r.dep!==depAtual) return false;
+    if(!rowPassaCoord(r)) return false;
+    if(filtroResp  && r.resp !==filtroResp)  return false;
+    if(filtroGrupo && r.grupo!==filtroGrupo) return false;
+    if(aplicarVencidas && filtroVencidas){{
+      const d=parseDateBR(r.venc);
+      if(!d||d>=hoje) return false;
+    }}
+    return true;
+  }});
 }}
 
 // ── Screens ───────────────────────────────────────────────────────────────────
@@ -808,6 +828,15 @@ function toggleFilter(tipo){{
   }}
 }}
 
+function toggleVencidas(){{
+  filtroVencidas=!filtroVencidas;
+  const btn=document.getElementById('btn-vencidas');
+  btn.style.background    = filtroVencidas ? 'rgba(227,30,36,.15)' : 'var(--surface)';
+  btn.style.borderColor   = filtroVencidas ? 'var(--red)'          : 'var(--border)';
+  btn.style.color         = filtroVencidas ? 'var(--red)'          : 'var(--muted)';
+  renderAll(); renderPlacares(); renderBaixasFunc();
+}}
+
 function fecharTodosDropdowns(){{
   ['coord','resp','grupo'].forEach(t=>{{
     document.getElementById(`${{t}}-dropdown`).classList.remove('open');
@@ -868,7 +897,7 @@ document.addEventListener('click',e=>{{
 
 // ── Render Tables ─────────────────────────────────────────────────────────────
 function renderAll(){{
-  const m=filtrar(DATA.man), f=filtrar(DATA.fin), a=filtrar(DATA.add);
+  const m=filtrar(DATA.man, true), f=filtrar(DATA.fin), a=filtrar(DATA.add);
   ['man','fin','add'].forEach((k,i)=>{{
     const n=[m,f,a][i].length;
     document.getElementById('sc-'+k).textContent=n;
@@ -880,8 +909,16 @@ function renderAll(){{
 function renderTabela(aba,rows){{
   const tbody=document.getElementById('tbody-'+aba);
   if(!rows.length){{tbody.innerHTML='<tr><td colspan="6" class="no-data">Nenhuma tarefa encontrada.</td></tr>';return;}}
-  const grupos={{}};
-  rows.forEach(r=>{{
+  const hoje=new Date(); hoje.setHours(0,0,0,0);
+  const sorted=[...rows].sort((a,b)=>{{
+    const da=parseDateBR(a.venc), db=parseDateBR(b.venc);
+    if(!da&&!db) return 0;
+    if(!da) return 1;
+    if(!db) return -1;
+    return da-db;
+}});
+const grupos={{}};
+sorted.forEach(r=>{{
     const key=r.dep+(r.novo?' (Cliente Novo)':'');
     if(!grupos[key])grupos[key]={{dep:r.dep,novo:r.novo,rows:[]}};
     grupos[key].rows.push(r);
