@@ -6,6 +6,7 @@ Versão 6.1
 
 import os, re, sys, json, argparse
 import pandas as pd
+import base64 as _b64
 from datetime import datetime
 from pathlib import Path
 
@@ -194,8 +195,6 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
     js_placares = json.dumps(placares or {}, ensure_ascii=False)
 
     # Lê o histórico para embutir no HTML
-    import os
-    import base64 as _b64
     historico_b64 = ""
     historico_path = Path("data/historico/historico_baixas.xlsx")
     if historico_path.exists():
