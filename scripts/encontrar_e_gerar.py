@@ -11,11 +11,13 @@ Executado pela GitHub Action. Responsável por:
        - BASE_SEM   = primeiro arquivo da semana (segunda-feira) que contém ATUAL
        - BASE_MES   = primeiro arquivo do mês calendário que contém ATUAL
   4. Chamar gerar_relatorio.py com todos os parâmetros
+  5. Chamar historico.py para acumular o histórico de baixas
 """
 
 import os
 import sys
 import re
+import json
 import subprocess
 from datetime import datetime, date, timedelta
 from pathlib import Path
@@ -23,6 +25,7 @@ from pathlib import Path
 DATA_DIR = Path("data")
 OUTPUT   = Path("index.html")
 SCRIPT   = Path("scripts/gerar_relatorio.py")
+HISTORICO = Path("scripts/historico.py")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -119,11 +122,13 @@ def main():
     print(f"[*] BASE DIA : {arq_dia.name}   ({dt_dia.strftime('%d/%m/%Y %H:%M')})")
     print(f"[*] BASE SEM : {arq_sem.name}   ({dt_sem.strftime('%d/%m/%Y %H:%M')})")
     print(f"[*] BASE MÊS : {arq_mes.name}   ({dt_mes.strftime('%d/%m/%Y %H:%M')})")
-    
-    COORD_XLSX = str(Path("data/coordenadores/Coordenadores (SP-RJ-Santos).xlsx"))   
+
+    COORD_XLSX = str(Path("data/coordenadores/Coordenadores (SP-RJ-Santos).xlsx"))
+
+    # ── Passo 1: gerar o HTML ────────────────────────────────────────────────
     cmd = [
         sys.executable, str(SCRIPT),
-        str(arq_mes),    # base principal (mês) — mantém compatibilidade
+        str(arq_mes),
         str(arq_atual),
         "--base-dia", str(arq_dia),
         "--base-sem", str(arq_sem),
@@ -132,9 +137,60 @@ def main():
         "-o", str(OUTPUT),
     ]
 
-    print(f"\n[*] Executando: {' '.join(cmd)}\n")
+    print(f"\n[*] Executando gerador HTML: {' '.join(cmd)}\n")
     result = subprocess.run(cmd)
-    sys.exit(result.returncode)
+    if result.returncode != 0:
+        print("[!] Erro ao gerar HTML. Abortando.")
+        sys.exit(result.returncode)
+
+    # ── Passo 2: calcular placares e salvar histórico ────────────────────────
+    if HISTORICO.exists():
+        print("\n[*] Calculando placares para o histórico...")
+        try:
+            # Importa gerar_relatorio para calcular os placares
+            sys.path.insert(0, str(Path("scripts")))
+            from gerar_relatorio import ler_relatorio, calcular_placares
+
+            resp_to_coords = {}
+            try:
+                from gerar_relatorio import carregar_coordenadores
+                resp_to_coords, _ = carregar_coordenadores(COORD_XLSX)
+            except Exception:
+                pass
+
+            def ler_seguro(caminho):
+                try:
+                    return ler_relatorio(caminho, resp_to_coords)
+                except Exception as e:
+                    print(f"[!] Não foi possível ler {caminho}: {e}")
+                    return None
+
+            df_atual = ler_seguro(str(arq_atual))
+            df_dia   = ler_seguro(str(arq_dia))
+            df_sem   = ler_seguro(str(arq_sem))
+            df_mes   = ler_seguro(str(arq_mes))
+
+            if df_atual is not None:
+                placares = calcular_placares(df_atual, df_dia, df_sem, df_mes)
+                placares_json = json.dumps(placares, ensure_ascii=False)
+
+                cmd_hist = [
+                    sys.executable, str(HISTORICO),
+                    "--placares-json", placares_json,
+                    "--data-ref", d_atual.isoformat(),
+                ]
+
+                print(f"[*] Executando historico.py para {d_atual}\n")
+                subprocess.run(cmd_hist)
+            else:
+                print("[!] Não foi possível calcular placares. Histórico não atualizado.")
+
+        except Exception as e:
+            print(f"[!] Erro ao processar histórico: {e}")
+    else:
+        print(f"[!] {HISTORICO} não encontrado. Histórico não atualizado.")
+
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()

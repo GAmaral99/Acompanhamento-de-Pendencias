@@ -3,13 +3,13 @@ name: Gerar Relatório de Pendências
 on:
   push:
     paths:
-      - 'data/**.xlsx'   # dispara quando qualquer .xlsx na pasta data/ for alterado
+      - 'data/**.xlsx'
       - 'scripts/**.py'
 
-  workflow_dispatch:     # permite rodar manualmente pelo GitHub
+  workflow_dispatch:
 
 permissions:
-  contents: write        # necessário para commitar o index.html gerado
+  contents: write
   pages: write
   id-token: write
 
@@ -21,7 +21,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # histórico completo (necessário para achar 1º arquivo da semana)
+          fetch-depth: 0
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -35,13 +35,13 @@ jobs:
         run: |
           python scripts/encontrar_e_gerar.py
 
-      - name: Commitar index.html gerado
+      - name: Commitar arquivos gerados
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add index.html
-          # só commita se houve mudança
-          git diff --staged --quiet || git commit -m "chore: atualiza relatório [skip ci]"
+          git add data/historico/historico_baixas.xlsx || true
+          git diff --staged --quiet || git commit -m "chore: atualiza relatório e histórico [skip ci]"
           git push
 
   publicar:
@@ -55,7 +55,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: main               # garante que pega o commit mais recente (após o push acima)
+          ref: main
 
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@v5
@@ -63,7 +63,7 @@ jobs:
       - name: Upload artefato
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'               # publica tudo na raiz (inclui index.html)
+          path: '.'
 
       - name: Deploy
         id: deploy
