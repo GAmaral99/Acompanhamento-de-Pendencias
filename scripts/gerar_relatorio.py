@@ -1264,7 +1264,7 @@ function _construirPDF(rows, periodo, hoje){{
   doc.setFontSize(9); doc.setFont('helvetica','normal');
   doc.text(`${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{periodoLabel}} · Gerado em ${{dataLabel}}`, 10, 17);
 
-  // Agrupa por dia
+// Agrupa por dia (histórico)
   const porDia = {{}};
   rows.forEach(r=>{{
     const d = r.Data||'';
@@ -1274,13 +1274,45 @@ function _construirPDF(rows, periodo, hoje){{
     porDia[d][resp].n = Math.max(porDia[d][resp].n, Number(r.BaixasDia)||0);
   }});
 
-  // Totais por funcionário
+  // Injeta dados de HOJE vindos dos placares em tempo real
+  const hojeStr = hoje.toISOString().slice(0,10);
+  const placarDia = (PLACARES.dia||{{}}).por_resp||[];
+  placarDia.forEach(r=>{{
+    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
+    if(!porDia[hojeStr]) porDia[hojeStr]={{}};
+    const resp = r.resp||'—';
+    if(!porDia[hojeStr][resp]) porDia[hojeStr][resp]={{coord:r.coord||'—', n:0}};
+    // Usa o maior valor entre histórico e placar em tempo real
+    porDia[hojeStr][resp].n = Math.max(porDia[hojeStr][resp].n, r.n||0);
+  }});
+
+  // Totais por funcionário (semana/mês vêm dos placares em tempo real)
   const totais = {{}};
+  const placarSem = (PLACARES.sem||{{}}).por_resp||[];
+  const placarMes = (PLACARES.mes||{{}}).por_resp||[];
+  [...placarSem, ...placarMes].forEach(r=>{{
+    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
+    const resp = r.resp||'—';
+    if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
+  }});
+  placarSem.forEach(r=>{{
+    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
+    const resp = r.resp||'—';
+    if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
+    totais[resp].sem = r.n||0;
+  }});
+  placarMes.forEach(r=>{{
+    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
+    const resp = r.resp||'—';
+    if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
+    totais[resp].mes = r.n||0;
+  }});
+  // Garante que funcionários do histórico também apareçam
   rows.forEach(r=>{{
     const resp=r.Funcionario||'—';
     if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', sem:0, mes:0}};
-    totais[resp].sem = Math.max(totais[resp].sem, Number(r.BaixasSemana)||0);
-    totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
+    if(!totais[resp].sem) totais[resp].sem = Math.max(totais[resp].sem, Number(r.BaixasSemana)||0);
+    if(!totais[resp].mes) totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
   }});
 
   const dias = Object.keys(porDia).sort();
