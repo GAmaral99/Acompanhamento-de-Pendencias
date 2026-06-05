@@ -7,6 +7,7 @@ Versão 6.1
 import os, re, sys, json, argparse
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 
 SHEET = "Pendencias CONSOLIDADO"
 
@@ -191,6 +192,18 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
     total_add = len(reabertas)
 
     js_placares = json.dumps(placares or {}, ensure_ascii=False)
+
+    # Lê o histórico para embutir no HTML
+    import os
+    import base64 as _b64
+    historico_b64 = ""
+    historico_path = Path("data/historico/historico_baixas.xlsx")
+    if historico_path.exists():
+        with open(historico_path, "rb") as _f:
+            historico_b64 = _b64.b64encode(_f.read()).decode()
+        print(f"[*] Histórico embutido no HTML ({len(historico_b64)//1024} KB base64)")
+    else:
+        print("[!] historico_baixas.xlsx não encontrado. PDF de histórico indisponível.")
 
     if all_coords:
         js_all_coords = json.dumps(sorted(all_coords), ensure_ascii=False)
@@ -427,6 +440,22 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 .bf-bar-fill{{height:100%;background:var(--green);border-radius:3px;transition:width .3s}}
 .bf-empty{{color:var(--muted);font-size:13px;padding:24px 16px;text-align:center;font-style:italic}}
 
+/* ── PDF MODAL ── */
+.pdf-modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s}}
+.pdf-modal-overlay.open{{opacity:1;pointer-events:all}}
+.pdf-modal{{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;width:360px;max-width:90vw;display:flex;flex-direction:column;gap:20px;transform:translateY(12px);transition:transform .22s}}
+.pdf-modal-overlay.open .pdf-modal{{transform:translateY(0)}}
+.pdf-modal-title{{font-size:16px;font-weight:700;letter-spacing:-.01em}}
+.pdf-modal-sub{{font-size:12px;color:var(--muted);margin-top:-12px}}
+.pdf-periodo-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+.pdf-periodo-btn{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all .18s;text-align:center;color:var(--white);font-family:var(--font)}}
+.pdf-periodo-btn:hover{{border-color:var(--red);background:rgba(227,30,36,.08)}}
+.pdf-periodo-btn .ppb-icon{{font-size:24px;display:block;margin-bottom:6px}}
+.pdf-periodo-btn .ppb-label{{font-size:13px;font-weight:700}}
+.pdf-periodo-btn .ppb-sub{{font-size:11px;color:var(--muted);margin-top:2px}}
+.pdf-modal-cancel{{background:none;border:1px solid var(--border);color:var(--muted);font-family:var(--font);font-size:12px;font-weight:600;padding:8px;border-radius:8px;cursor:pointer;transition:all .18s;text-transform:uppercase;letter-spacing:.08em}}
+.pdf-modal-cancel:hover{{border-color:var(--red);color:var(--white)}}
+
 /* capture overlay */
 .capture-overlay{{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px}}
 .capture-spinner{{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--green);border-radius:50%;animation:spin .8s linear infinite}}
@@ -580,28 +609,52 @@ body.light .results-header{{background:linear-gradient(135deg,#fde8e9 0%,#f5f5f5
       <div class="placares-export-row">
         <button class="placar-export-btn" onclick="exportarPlacares('geral')">⬇ Baixar imagem geral</button>
         <button class="placar-export-btn" onclick="exportarPlacares('dep')">⬇ Baixar por departamento</button>
+        <button class="placar-export-btn" onclick="abrirModalPDF()" style="border-color:var(--red);color:var(--red)">📄 Relatório PDF</button>
       </div>
+
       <div class="placares-grid" id="placares-grid">
-        <div class="placar-card pc-dia" id="pc-dia">
+        <div class="placar-card pc-dia">
           <div class="pc-label">Baixas no Dia</div>
           <div class="pc-num" id="pc-dia-num">0</div>
-          <div class="pc-sub">tarefas concluídas hoje</div>
+          <div class="pc-sub">tarefas finalizadas hoje</div>
           <div class="pc-deps" id="pc-dia-deps"></div>
         </div>
-        <div class="placar-card pc-sem" id="pc-sem">
+        <div class="placar-card pc-sem">
           <div class="pc-label">Baixas na Semana</div>
           <div class="pc-num" id="pc-sem-num">0</div>
-          <div class="pc-sub">desde segunda-feira</div>
+          <div class="pc-sub">tarefas finalizadas esta semana</div>
           <div class="pc-deps" id="pc-sem-deps"></div>
         </div>
-        <div class="placar-card pc-mes" id="pc-mes">
+        <div class="placar-card pc-mes">
           <div class="pc-label">Baixas no Mês</div>
           <div class="pc-num" id="pc-mes-num">0</div>
-          <div class="pc-sub">acumulado do mês</div>
+          <div class="pc-sub">tarefas finalizadas este mês</div>
           <div class="pc-deps" id="pc-mes-deps"></div>
         </div>
       </div>
+
+<!-- Modal PDF -->
+<div class="pdf-modal-overlay" id="pdf-modal-overlay" onclick="fecharModalPDF(event)">
+  <div class="pdf-modal">
+    <div>
+      <div class="pdf-modal-title">📄 Relatório de Baixas</div>
+      <div class="pdf-modal-sub">Escolha o período do relatório</div>
     </div>
+    <div class="pdf-periodo-grid">
+      <button class="pdf-periodo-btn" onclick="gerarPDF('sem')">
+        <span class="ppb-icon">📅</span>
+        <div class="ppb-label">Semana Atual</div>
+        <div class="ppb-sub">Seg → hoje</div>
+      </button>
+      <button class="pdf-periodo-btn" onclick="gerarPDF('mes')">
+        <span class="ppb-icon">🗓️</span>
+        <div class="ppb-label">Mês Atual</div>
+        <div class="ppb-sub">01 → hoje</div>
+      </button>
+    </div>
+    <button class="pdf-modal-cancel" onclick="fecharModalPDF()">Cancelar</button>
+  </div>
+</div>
 
     <!-- Baixas por Funcionário -->
     <div class="baixas-func-section" id="baixas-func-section" style="display:none">
@@ -1111,6 +1164,185 @@ function toggleTema(){{
   if(claro) document.body.classList.add('light');
   document.getElementById('theme-toggle').textContent = claro ? '☀️' : '🌙';
 }})();
+
+// ── PDF HISTÓRICO ─────────────────────────────────────────────────────────────
+const HIST_B64 = {json.dumps(historico_b64 if 'historico_b64' in dir() else '')};
+
+function abrirModalPDF(){{
+  document.getElementById('pdf-modal-overlay').classList.add('open');
+}}
+function fecharModalPDF(e){{
+  if(!e || e.target===document.getElementById('pdf-modal-overlay'))
+    document.getElementById('pdf-modal-overlay').classList.remove('open');
+}}
+
+async function gerarPDF(periodo){{
+  fecharModalPDF();
+  if(!HIST_B64){{
+    alert('Histórico não disponível. Execute a Action novamente.');
+    return;
+  }}
+
+  const overlay=document.createElement('div');
+  overlay.className='capture-overlay';
+  overlay.innerHTML='<div class="capture-spinner"></div><span style="color:#aaa;font-size:13px">Gerando PDF...</span>';
+  document.body.appendChild(overlay);
+
+  try{{
+    // Carrega jsPDF e AutoTable
+    await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    // Carrega SheetJS para ler o xlsx
+    await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
+
+    const rows = _lerHistorico();
+    if(!rows.length){{ alert('Nenhum dado encontrado no histórico.'); return; }}
+
+    const hoje = new Date();
+    const semanaAtual = _semanaISO(hoje);
+    const mesAtual = hoje.toISOString().slice(0,7);
+
+    const filtrados = rows.filter(r => {{
+      if(periodo==='sem') return r.Semana === semanaAtual && r.Filial === filialAtual && r.Departamento === depAtual;
+      return r.Mes === mesAtual && r.Filial === filialAtual && r.Departamento === depAtual;
+    }});
+
+    if(!filtrados.length){{
+      alert(`Nenhuma baixa registrada para ${{labelFilial(filialAtual)}} · ${{depAtual}} neste período.`);
+      return;
+    }}
+
+    _construirPDF(filtrados, periodo, hoje);
+  }} catch(e){{
+    console.error(e);
+    alert('Erro ao gerar PDF: ' + e.message);
+  }} finally{{
+    document.body.removeChild(overlay);
+  }}
+}}
+
+function _lerHistorico(){{
+  try{{
+    const bin = atob(HIST_B64);
+    const arr = new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+    const wb = XLSX.read(arr, {{type:'array'}});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws);
+  }} catch(e){{ console.error('Erro ao ler histórico:',e); return []; }}
+}}
+
+function _semanaISO(d){{
+  const tmp = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dow = tmp.getUTCDay()||7;
+  tmp.setUTCDate(tmp.getUTCDate()+4-dow);
+  const y = tmp.getUTCFullYear();
+  const w = Math.ceil(((tmp-new Date(Date.UTC(y,0,1)))/86400000+1)/7);
+  return `${{y}}-W${{String(w).padStart(2,'0')}}`;
+}}
+
+function _loadScript(src){{
+  return new Promise((res,rej)=>{{
+    if(document.querySelector(`script[src="${{src}}"]`)){{res();return;}}
+    const s=document.createElement('script');
+    s.src=src; s.onload=res; s.onerror=rej;
+    document.head.appendChild(s);
+  }});
+}}
+
+function _construirPDF(rows, periodo, hoje){{
+  const {{ jsPDF }} = window.jspdf;
+  const doc = new jsPDF({{orientation:'landscape',unit:'mm',format:'a4'}});
+  const periodoLabel = periodo==='sem' ? 'Semana Atual' : 'Mês Atual';
+  const dataLabel = hoje.toLocaleDateString('pt-BR');
+
+  // Cabeçalho
+  doc.setFillColor(227,30,36);
+  doc.rect(0,0,297,18,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text('MG Contécnica · Relatório de Baixas', 10, 12);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(`${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{periodoLabel}} · Gerado em ${{dataLabel}}`, 10, 17);
+
+  // Agrupa por dia
+  const porDia = {{}};
+  rows.forEach(r=>{{
+    const d = r.Data||'';
+    if(!porDia[d]) porDia[d]={{}};
+    const resp = r.Funcionario||'—';
+    if(!porDia[d][resp]) porDia[d][resp]={{coord:r.Coordenador||'—', n:0}};
+    porDia[d][resp].n = Math.max(porDia[d][resp].n, Number(r.BaixasDia)||0);
+  }});
+
+  // Totais por funcionário
+  const totais = {{}};
+  rows.forEach(r=>{{
+    const resp=r.Funcionario||'—';
+    if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', sem:0, mes:0}};
+    totais[resp].sem = Math.max(totais[resp].sem, Number(r.BaixasSemana)||0);
+    totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
+  }});
+
+  const dias = Object.keys(porDia).sort();
+  const funcs = Object.keys(totais).sort();
+
+  // Monta colunas: Funcionário | Coord | dia1 | dia2 | ... | Total Sem | Total Mês
+  const colsDia = dias.map(d=>{{
+    const dt=new Date(d+'T12:00:00');
+    return {{data:d, label:dt.toLocaleDateString('pt-BR',{{weekday:'short',day:'2-digit',month:'2-digit'}})}};
+  }});
+
+  const head = [['Funcionário','Coordenador',...colsDia.map(c=>c.label),'Total Sem','Total Mês']];
+  const body = funcs.map(f=>{{
+    const t=totais[f];
+    const diasVals = colsDia.map(c=>{{
+      const v = porDia[c.data]?.[f]?.n;
+      return v!=null ? String(v) : '—';
+    }});
+    return [f, t.coord, ...diasVals, String(t.sem), String(t.mes)];
+  }});
+
+  // Linha de total
+  const totalRow = ['TOTAL',''];
+  colsDia.forEach(c=>{{
+    const soma = funcs.reduce((a,f)=>a+(porDia[c.data]?.[f]?.n||0),0);
+    totalRow.push(String(soma));
+  }});
+  totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].sem||0),0)));
+  totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
+  body.push(totalRow);
+
+  doc.autoTable({{
+    head, body,
+    startY: 24,
+    styles:{{fontSize:8,cellPadding:2,halign:'center',textColor:[30,30,30]}},
+    headStyles:{{fillColor:[227,30,36],textColor:255,fontStyle:'bold',fontSize:8}},
+    columnStyles:{{0:{{halign:'left',fontStyle:'bold',cellWidth:38}},1:{{halign:'left',cellWidth:28}}}},
+    alternateRowStyles:{{fillColor:[245,245,245]}},
+    didParseCell: function(data){{
+      // Destaca linha de total
+      if(data.row.index===body.length-1){{
+        data.cell.styles.fillColor=[227,30,36];
+        data.cell.styles.textColor=255;
+        data.cell.styles.fontStyle='bold';
+      }}
+    }},
+    margin:{{left:10,right:10}},
+  }});
+
+  // Rodapé
+  const pageCount=doc.internal.getNumberOfPages();
+  for(let i=1;i<=pageCount;i++){{
+    doc.setPage(i);
+    doc.setFontSize(7);doc.setTextColor(150);
+    doc.text(`Página ${{i}} de ${{pageCount}}`,287,205,{{align:'right'}});
+    doc.text('MG Contécnica · Relatório Confidencial',10,205);
+  }}
+
+  const nomeArq=`relatorio_baixas_${{depAtual.replace(/\s+/g,'_')}}_${{periodo}}_${{hoje.toISOString().slice(0,10)}}.pdf`;
+  doc.save(nomeArq);
+}}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 buildFiliais();
