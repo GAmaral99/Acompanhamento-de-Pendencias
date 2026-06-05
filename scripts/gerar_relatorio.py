@@ -442,10 +442,10 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 /* ── PDF MODAL ── */
 .pdf-modal-overlay{{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:1000;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .22s}}
 .pdf-modal-overlay.open{{opacity:1;pointer-events:all}}
-.pdf-modal{{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;width:360px;max-width:90vw;display:flex;flex-direction:column;gap:20px;transform:translateY(12px);transition:transform .22s}}
+.pdf-modal{{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:32px;width:400px;max-width:90vw;display:flex;flex-direction:column;gap:24px;transform:translateY(12px);transition:transform .22s}}
 .pdf-modal-overlay.open .pdf-modal{{transform:translateY(0)}}
 .pdf-modal-title{{font-size:16px;font-weight:700;letter-spacing:-.01em}}
-.pdf-modal-sub{{font-size:12px;color:var(--muted);margin-top:-12px}}
+.pdf-modal-sub{{font-size:12px;color:var(--muted);margin-top:4px}}
 .pdf-periodo-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
 .pdf-periodo-btn{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all .18s;text-align:center;color:var(--white);font-family:var(--font)}}
 .pdf-periodo-btn:hover{{border-color:var(--red);background:rgba(227,30,36,.08)}}
