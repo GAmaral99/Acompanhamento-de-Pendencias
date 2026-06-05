@@ -441,9 +441,34 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
   .filter-wrap{{max-width:100%}}
   .placares-grid{{grid-template-columns:1fr}}
 }}
+
+/* ── TEMA CLARO ── */
+body.light{{
+  --bg:#f5f5f5;--surface:#ffffff;--surface2:#ebebeb;--border:#d4d4d4;
+  --white:#1a1a1a;--off-white:#2a2a2a;--muted:#666;--muted2:#999;
+  --red:#C41A1F;--red-dim:#f7c5c6;--red-glow:rgba(196,26,31,.12);
+  --green:#18a360;--amber:#c97d00;--blue:#1a6fbf;
+}}
+body.light body::before{{background-image:linear-gradient(rgba(196,26,31,.018) 1px,transparent 1px),linear-gradient(90deg,rgba(196,26,31,.018) 1px,transparent 1px)}}
+body.light .filial-card{{box-shadow:0 2px 8px rgba(0,0,0,.07)}}
+body.light table{{box-shadow:0 2px 8px rgba(0,0,0,.06)}}
+body.light .results-header{{background:linear-gradient(135deg,#fde8e9 0%,#f5f5f5 60%)}}
+
+/* ── BOTÃO TEMA ── */
+#theme-toggle{{
+  position:fixed;top:18px;right:20px;z-index:9000;
+  background:var(--surface);border:1px solid var(--border);
+  color:var(--white);font-size:18px;line-height:1;
+  width:40px;height:40px;border-radius:50%;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);transition:all .2s;
+}}
+#theme-toggle:hover{{border-color:var(--red);box-shadow:0 4px 16px var(--red-glow);transform:scale(1.08)}}
 </style>
 </head>
 <body>
+
+<button id="theme-toggle" onclick="toggleTema()" title="Alternar tema"></button>
 
 <!-- ══ SCREEN 1: FILIAL ══ -->
 <div class="screen active" id="screen-filial">
@@ -1073,6 +1098,19 @@ async function exportarPlacares(modo){{
 function _downloadCanvas(canvas,filename){{
   const link=document.createElement('a');link.download=filename;link.href=canvas.toDataURL('image/png');link.click();
 }}
+
+// ── Tema claro/escuro ─────────────────────────────────────────────────────────
+function toggleTema(){{
+  const claro = document.body.classList.toggle('light');
+  localStorage.setItem('tema','relatorio-pendencias');
+  localStorage.setItem('tema-claro', claro ? '1' : '0');
+  document.getElementById('theme-toggle').textContent = claro ? '☀️' : '🌙';
+}}
+(function(){{
+  const claro = localStorage.getItem('tema-claro') === '1';
+  if(claro) document.body.classList.add('light');
+  document.getElementById('theme-toggle').textContent = claro ? '☀️' : '🌙';
+}})();
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 buildFiliais();
