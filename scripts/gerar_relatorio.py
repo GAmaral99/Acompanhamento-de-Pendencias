@@ -1271,25 +1271,30 @@ function _construirPDF(rows, periodo, hoje){{
   let head, body;
 
   if(periodo === 'mes'){{
-    // Agrupa BaixasDia por semana-do-mês
-    const porSemana = {{}};
+    // weekData[resp][sem] = {{maxBS: max(BaixasSemana), coord}}
+    // Para semanas concluídas, max(BaixasSemana) = total da semana (acumula até o último dia).
+    // Para a semana atual, max(BaixasSemana) = acumulado até hoje.
+    // Propriedade: sum(maxBS por semana) == BaixasMes => soma das colunas == Total Mês.
+    const weekData = {{}};
     rows.forEach(r=>{{
       const d = r.Data||'';
       if(!d) return;
       const sem = _semanaDoMes(d);
-      if(!porSemana[sem]) porSemana[sem]={{}};
       const resp = r.Funcionario||'—';
-      porSemana[sem][resp] = (porSemana[sem][resp]||0) + (Number(r.BaixasDia)||0);
+      if(!weekData[resp]) weekData[resp]={{}};
+      if(!weekData[resp][sem]) weekData[resp][sem]={{maxBS:0, coord:r.Coordenador||'—'}};
+      weekData[resp][sem].maxBS = Math.max(weekData[resp][sem].maxBS, Number(r.BaixasSemana)||0);
       if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', mes:0}};
       totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
     }});
-    // Injeta dados de hoje via placar em tempo real
+    // Injeta semana atual via PLACARES.sem (já acumula o dia de hoje)
     const semHoje = _semanaDoMes(hojeStr);
-    if(!porSemana[semHoje]) porSemana[semHoje]={{}};
-    ((PLACARES.dia||{{}}).por_resp||[]).forEach(r=>{{
+    ((PLACARES.sem||{{}}).por_resp||[]).forEach(r=>{{
       if(r.unidade!==filialAtual||r.dep!==depAtual) return;
       const resp=r.resp||'—';
-      porSemana[semHoje][resp] = Math.max(porSemana[semHoje][resp]||0, r.n||0);
+      if(!weekData[resp]) weekData[resp]={{}};
+      if(!weekData[resp][semHoje]) weekData[resp][semHoje]={{maxBS:0, coord:r.coord||'—'}};
+      weekData[resp][semHoje].maxBS = Math.max(weekData[resp][semHoje].maxBS, r.n||0);
       if(!totais[resp]) totais[resp]={{coord:r.coord||'—', mes:0}};
     }});
     ((PLACARES.mes||{{}}).por_resp||[]).forEach(r=>{{
@@ -1299,16 +1304,22 @@ function _construirPDF(rows, periodo, hoje){{
       totais[resp].mes = Math.max(totais[resp].mes, r.n||0);
     }});
 
-    const sems = Object.keys(porSemana).map(Number).sort((a,b)=>a-b);
+    const allSems=[...new Set(
+      Object.values(weekData).flatMap(d=>Object.keys(d).map(Number))
+    )].sort((a,b)=>a-b);
     const funcs = Object.keys(totais).sort();
-    head = [['Funcionário','Coordenador',...sems.map(s=>`Semana ${{s}}`),'Total Mês']];
+    head = [['Funcionário','Coordenador',...allSems.map(s=>`Semana ${{s}}`),'Total Mês']];
     body = funcs.map(f=>{{
       const t=totais[f];
-      const vals=sems.map(s=>{{const v=porSemana[s][f]; return v!=null?String(v):'—';}});
+      const wd=weekData[f]||{{}};
+      const vals=allSems.map(s=>{{
+        const v=wd[s]?.maxBS;
+        return (v!=null&&v>0)?String(v):'—';
+      }});
       return [f, t.coord, ...vals, String(t.mes)];
     }});
     const totalRow=['TOTAL',''];
-    sems.forEach(s=>totalRow.push(String(funcs.reduce((a,f)=>a+(porSemana[s][f]||0),0))));
+    allSems.forEach(s=>totalRow.push(String(funcs.reduce((a,f)=>a+((weekData[f]?.[s]?.maxBS)||0),0))));
     totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
     body.push(totalRow);
 
