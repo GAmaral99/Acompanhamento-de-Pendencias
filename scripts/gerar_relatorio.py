@@ -448,7 +448,7 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 .pdf-modal-overlay.open .pdf-modal{{transform:translateY(0)}}
 .pdf-modal-title{{font-size:16px;font-weight:700;letter-spacing:-.01em}}
 .pdf-modal-sub{{font-size:12px;color:var(--muted);margin-top:4px}}
-.pdf-periodo-grid{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}}
+.pdf-periodo-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
 .pdf-periodo-btn{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all .18s;text-align:center;color:var(--white);font-family:var(--font)}}
 .pdf-periodo-btn:hover{{border-color:var(--red);background:rgba(227,30,36,.08)}}
 .pdf-periodo-btn .ppb-icon{{font-size:24px;display:block;margin-bottom:6px}}
@@ -651,11 +651,6 @@ body.light .results-header{{background:linear-gradient(135deg,#fde8e9 0%,#f5f5f5
         <span class="ppb-icon">🗓️</span>
         <div class="ppb-label">Mês Atual</div>
         <div class="ppb-sub">01 → hoje</div>
-      </button>
-      <button class="pdf-periodo-btn" onclick="gerarPDF('mes_semanas')">
-        <span class="ppb-icon">📊</span>
-        <div class="ppb-label">Mês por Semanas</div>
-        <div class="ppb-sub">Sem1 · Sem2 · Sem3 · Sem4</div>
       </button>
     </div>
     <button class="pdf-modal-cancel" onclick="fecharModalPDF()">Cancelar</button>
@@ -1269,88 +1264,113 @@ function _construirPDF(rows, periodo, hoje){{
   const doc = new jsPDF({{orientation:'landscape',unit:'mm',format:'a4'}});
   const periodoLabel = periodo==='sem' ? 'Semana Atual' : 'Mês Atual';
   const dataLabel = hoje.toLocaleDateString('pt-BR');
-
   _cabecalhoPDF(doc, periodoLabel, dataLabel);
 
-// Agrupa por dia (histórico)
-  const porDia = {{}};
-  rows.forEach(r=>{{
-    const d = r.Data||'';
-    if(!porDia[d]) porDia[d]={{}};
-    const resp = r.Funcionario||'—';
-    if(!porDia[d][resp]) porDia[d][resp]={{coord:r.Coordenador||'—', n:0}};
-    porDia[d][resp].n = Math.max(porDia[d][resp].n, Number(r.BaixasDia)||0);
-  }});
-
-  // Injeta dados de HOJE vindos dos placares em tempo real
-  const hojeStr = hoje.toISOString().slice(0,10);
-  const placarDia = (PLACARES.dia||{{}}).por_resp||[];
-  placarDia.forEach(r=>{{
-    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
-    if(!porDia[hojeStr]) porDia[hojeStr]={{}};
-    const resp = r.resp||'—';
-    if(!porDia[hojeStr][resp]) porDia[hojeStr][resp]={{coord:r.coord||'—', n:0}};
-    // Usa o maior valor entre histórico e placar em tempo real
-    porDia[hojeStr][resp].n = Math.max(porDia[hojeStr][resp].n, r.n||0);
-  }});
-
-  // Totais por funcionário (semana/mês vêm dos placares em tempo real)
   const totais = {{}};
-  const placarSem = (PLACARES.sem||{{}}).por_resp||[];
-  const placarMes = (PLACARES.mes||{{}}).por_resp||[];
-  [...placarSem, ...placarMes].forEach(r=>{{
-    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
-    const resp = r.resp||'—';
-    if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
-  }});
-  placarSem.forEach(r=>{{
-    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
-    const resp = r.resp||'—';
-    if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
-    totais[resp].sem = r.n||0;
-  }});
-  placarMes.forEach(r=>{{
-    if(r.unidade !== filialAtual || r.dep !== depAtual) return;
-    const resp = r.resp||'—';
-    if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
-    totais[resp].mes = r.n||0;
-  }});
-  // Garante que funcionários do histórico também apareçam
-  rows.forEach(r=>{{
-    const resp=r.Funcionario||'—';
-    if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', sem:0, mes:0}};
-    if(!totais[resp].sem) totais[resp].sem = Math.max(totais[resp].sem, Number(r.BaixasSemana)||0);
-    if(!totais[resp].mes) totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
-  }});
+  const hojeStr = hoje.toISOString().slice(0,10);
+  let head, body;
 
-  const dias = Object.keys(porDia).sort();
-  const funcs = Object.keys(totais).sort();
-
-  // Monta colunas: Funcionário | Coord | dia1 | dia2 | ... | Total Sem | Total Mês
-  const colsDia = dias.map(d=>{{
-    const dt=new Date(d+'T12:00:00');
-    return {{data:d, label:dt.toLocaleDateString('pt-BR',{{weekday:'short',day:'2-digit',month:'2-digit'}})}};
-  }});
-
-  const head = [['Funcionário','Coordenador',...colsDia.map(c=>c.label),'Total Sem','Total Mês']];
-  const body = funcs.map(f=>{{
-    const t=totais[f];
-    const diasVals = colsDia.map(c=>{{
-      const v = porDia[c.data]?.[f]?.n;
-      return v!=null ? String(v) : '—';
+  if(periodo === 'mes'){{
+    // Agrupa BaixasDia por semana-do-mês
+    const porSemana = {{}};
+    rows.forEach(r=>{{
+      const d = r.Data||'';
+      if(!d) return;
+      const sem = _semanaDoMes(d);
+      if(!porSemana[sem]) porSemana[sem]={{}};
+      const resp = r.Funcionario||'—';
+      porSemana[sem][resp] = (porSemana[sem][resp]||0) + (Number(r.BaixasDia)||0);
+      if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', mes:0}};
+      totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
     }});
-    return [f, t.coord, ...diasVals, String(t.sem), String(t.mes)];
-  }});
+    // Injeta dados de hoje via placar em tempo real
+    const semHoje = _semanaDoMes(hojeStr);
+    if(!porSemana[semHoje]) porSemana[semHoje]={{}};
+    ((PLACARES.dia||{{}}).por_resp||[]).forEach(r=>{{
+      if(r.unidade!==filialAtual||r.dep!==depAtual) return;
+      const resp=r.resp||'—';
+      porSemana[semHoje][resp] = Math.max(porSemana[semHoje][resp]||0, r.n||0);
+      if(!totais[resp]) totais[resp]={{coord:r.coord||'—', mes:0}};
+    }});
+    ((PLACARES.mes||{{}}).por_resp||[]).forEach(r=>{{
+      if(r.unidade!==filialAtual||r.dep!==depAtual) return;
+      const resp=r.resp||'—';
+      if(!totais[resp]) totais[resp]={{coord:r.coord||'—', mes:0}};
+      totais[resp].mes = Math.max(totais[resp].mes, r.n||0);
+    }});
 
-  // Linha de total
-  const totalRow = ['TOTAL',''];
-  colsDia.forEach(c=>{{
-    const soma = funcs.reduce((a,f)=>a+(porDia[c.data]?.[f]?.n||0),0);
-    totalRow.push(String(soma));
-  }});
-  totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].sem||0),0)));
-  totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
-  body.push(totalRow);
+    const sems = Object.keys(porSemana).map(Number).sort((a,b)=>a-b);
+    const funcs = Object.keys(totais).sort();
+    head = [['Funcionário','Coordenador',...sems.map(s=>`Semana ${{s}}`),'Total Mês']];
+    body = funcs.map(f=>{{
+      const t=totais[f];
+      const vals=sems.map(s=>{{const v=porSemana[s][f]; return v!=null?String(v):'—';}});
+      return [f, t.coord, ...vals, String(t.mes)];
+    }});
+    const totalRow=['TOTAL',''];
+    sems.forEach(s=>totalRow.push(String(funcs.reduce((a,f)=>a+(porSemana[s][f]||0),0))));
+    totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
+    body.push(totalRow);
+
+  }}else{{
+    // periodo === 'sem': dias individuais
+    const porDia = {{}};
+    rows.forEach(r=>{{
+      const d = r.Data||'';
+      if(!porDia[d]) porDia[d]={{}};
+      const resp = r.Funcionario||'—';
+      if(!porDia[d][resp]) porDia[d][resp]={{coord:r.Coordenador||'—', n:0}};
+      porDia[d][resp].n = Math.max(porDia[d][resp].n, Number(r.BaixasDia)||0);
+      if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', sem:0, mes:0}};
+    }});
+    // Injeta dados de HOJE
+    if(!porDia[hojeStr]) porDia[hojeStr]={{}};
+    ((PLACARES.dia||{{}}).por_resp||[]).forEach(r=>{{
+      if(r.unidade!==filialAtual||r.dep!==depAtual) return;
+      const resp=r.resp||'—';
+      if(!porDia[hojeStr][resp]) porDia[hojeStr][resp]={{coord:r.coord||'—', n:0}};
+      porDia[hojeStr][resp].n = Math.max(porDia[hojeStr][resp].n, r.n||0);
+      if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
+    }});
+    // Totais via placares e histórico
+    ((PLACARES.sem||{{}}).por_resp||[]).forEach(r=>{{
+      if(r.unidade!==filialAtual||r.dep!==depAtual) return;
+      const resp=r.resp||'—';
+      if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
+      totais[resp].sem = r.n||0;
+    }});
+    ((PLACARES.mes||{{}}).por_resp||[]).forEach(r=>{{
+      if(r.unidade!==filialAtual||r.dep!==depAtual) return;
+      const resp=r.resp||'—';
+      if(!totais[resp]) totais[resp]={{coord:r.coord||'—', sem:0, mes:0}};
+      totais[resp].mes = r.n||0;
+    }});
+    rows.forEach(r=>{{
+      const resp=r.Funcionario||'—';
+      if(!totais[resp]) totais[resp]={{coord:r.Coordenador||'—', sem:0, mes:0}};
+      totais[resp].sem = Math.max(totais[resp].sem, Number(r.BaixasSemana)||0);
+      totais[resp].mes = Math.max(totais[resp].mes, Number(r.BaixasMes)||0);
+    }});
+
+    const dias = Object.keys(porDia).sort();
+    const funcs = Object.keys(totais).sort();
+    const colsDia = dias.map(d=>{{
+      const dt=new Date(d+'T12:00:00');
+      return {{data:d, label:dt.toLocaleDateString('pt-BR',{{weekday:'short',day:'2-digit',month:'2-digit'}})}};
+    }});
+
+    head = [['Funcionário','Coordenador',...colsDia.map(c=>c.label),'Total Sem','Total Mês']];
+    body = funcs.map(f=>{{
+      const t=totais[f];
+      const diasVals=colsDia.map(c=>{{const v=porDia[c.data]?.[f]?.n; return v!=null?String(v):'—';}});
+      return [f, t.coord, ...diasVals, String(t.sem), String(t.mes)];
+    }});
+    const totalRow=['TOTAL',''];
+    colsDia.forEach(c=>totalRow.push(String(funcs.reduce((a,f)=>a+(porDia[c.data]?.[f]?.n||0),0))));
+    totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].sem||0),0)));
+    totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
+    body.push(totalRow);
+  }}
 
   doc.autoTable({{
     head, body,
@@ -1360,7 +1380,6 @@ function _construirPDF(rows, periodo, hoje){{
     columnStyles:{{0:{{halign:'left',fontStyle:'bold',cellWidth:38}},1:{{halign:'left',cellWidth:28}}}},
     alternateRowStyles:{{fillColor:[245,245,245]}},
     didParseCell: function(data){{
-      // Destaca linha de total
       if(data.row.index===body.length-1){{
         data.cell.styles.fillColor=[227,30,36];
         data.cell.styles.textColor=255;
@@ -1396,8 +1415,8 @@ function _rodapePDF(doc){{
   }}
 }}
 
-function _semanaDoMes(d){{
-  return Math.min(4, Math.ceil(d.getDate() / 7));
+function _semanaDoMes(dataStr){{
+  return Math.floor((new Date(dataStr+'T12:00:00').getDate()-1)/7)+1;
 }}
 
 function _construirPDFMesSemanas(rows, hoje){{
@@ -1428,8 +1447,7 @@ function _construirPDFMesSemanas(rows, hoje){{
   allRows.forEach(r => {{
     const d = r.Data||'';
     if(!d) return;
-    const dt = new Date(d+'T12:00:00');
-    const sem = _semanaDoMes(dt);
+    const sem = _semanaDoMes(d);
     const resp = r.Funcionario||'—';
     const val = Number(r.BaixasDia)||0;
     if(!semDays[sem][d]) semDays[sem][d]={{}};
