@@ -177,7 +177,7 @@ def main():
                 cmd_hist = [
                     sys.executable, str(HISTORICO),
                     "--placares-json", placares_json,
-                    "--data-ref", d_atual.isoformat(),
+                    "--data-ref", date.today().isoformat(),
                 ]
 
                 print(f"[*] Executando historico.py para {d_atual}\n")
