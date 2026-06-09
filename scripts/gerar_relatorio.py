@@ -182,7 +182,9 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
                placares=None, all_coords=None):
     nome_base  = os.path.basename(arquivo_base)
     nome_atual = os.path.basename(arquivo_atual) if arquivo_atual else nome_base
-    gerado_em  = datetime.now().strftime("%d/%m/%Y às %H:%M")
+    from datetime import timezone, timedelta
+    tz_brasilia = timezone(timedelta(hours=-3))
+    gerado_em   = datetime.now(tz_brasilia).strftime("%d/%m/%Y às %H:%M")
     modo_comp  = arquivo_atual and arquivo_atual != arquivo_base
 
     js_man = df_to_js(em_andamento)
@@ -446,7 +448,7 @@ tr.dep-row td{{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;f
 .pdf-modal-overlay.open .pdf-modal{{transform:translateY(0)}}
 .pdf-modal-title{{font-size:16px;font-weight:700;letter-spacing:-.01em}}
 .pdf-modal-sub{{font-size:12px;color:var(--muted);margin-top:4px}}
-.pdf-periodo-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+.pdf-periodo-grid{{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}}
 .pdf-periodo-btn{{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:16px;cursor:pointer;transition:all .18s;text-align:center;color:var(--white);font-family:var(--font)}}
 .pdf-periodo-btn:hover{{border-color:var(--red);background:rgba(227,30,36,.08)}}
 .pdf-periodo-btn .ppb-icon{{font-size:24px;display:block;margin-bottom:6px}}
@@ -649,6 +651,11 @@ body.light .results-header{{background:linear-gradient(135deg,#fde8e9 0%,#f5f5f5
         <span class="ppb-icon">🗓️</span>
         <div class="ppb-label">Mês Atual</div>
         <div class="ppb-sub">01 → hoje</div>
+      </button>
+      <button class="pdf-periodo-btn" onclick="gerarPDF('mes_semanas')">
+        <span class="ppb-icon">📊</span>
+        <div class="ppb-label">Mês por Semanas</div>
+        <div class="ppb-sub">Sem1 · Sem2 · Sem3 · Sem4</div>
       </button>
     </div>
     <button class="pdf-modal-cancel" onclick="fecharModalPDF()">Cancelar</button>
@@ -1188,10 +1195,8 @@ async function gerarPDF(periodo){{
   document.body.appendChild(overlay);
 
   try{{
-    // Carrega jsPDF e AutoTable
     await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
     await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
-    // Carrega SheetJS para ler o xlsx
     await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js');
 
     const rows = _lerHistorico();
@@ -1200,6 +1205,16 @@ async function gerarPDF(periodo){{
     const hoje = new Date();
     const semanaAtual = _semanaISO(hoje);
     const mesAtual = hoje.toISOString().slice(0,7);
+
+    if(periodo === 'mes_semanas'){{
+      const filtrados = rows.filter(r => r.Mes === mesAtual && r.Filial === filialAtual && r.Departamento === depAtual);
+      if(!filtrados.length){{
+        alert(`Nenhuma baixa registrada para ${{labelFilial(filialAtual)}} · ${{depAtual}} neste mês.`);
+        return;
+      }}
+      _construirPDFMesSemanas(filtrados, hoje);
+      return;
+    }}
 
     const filtrados = rows.filter(r => {{
       if(periodo==='sem') return r.Semana === semanaAtual && r.Filial === filialAtual && r.Departamento === depAtual;
@@ -1255,14 +1270,7 @@ function _construirPDF(rows, periodo, hoje){{
   const periodoLabel = periodo==='sem' ? 'Semana Atual' : 'Mês Atual';
   const dataLabel = hoje.toLocaleDateString('pt-BR');
 
-  // Cabeçalho
-  doc.setFillColor(227,30,36);
-  doc.rect(0,0,297,18,'F');
-  doc.setTextColor(255,255,255);
-  doc.setFontSize(13); doc.setFont('helvetica','bold');
-  doc.text('MG Contécnica · Relatório de Baixas', 10, 12);
-  doc.setFontSize(9); doc.setFont('helvetica','normal');
-  doc.text(`${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{periodoLabel}} · Gerado em ${{dataLabel}}`, 10, 17);
+  _cabecalhoPDF(doc, periodoLabel, dataLabel);
 
 // Agrupa por dia (histórico)
   const porDia = {{}};
@@ -1362,16 +1370,168 @@ function _construirPDF(rows, periodo, hoje){{
     margin:{{left:10,right:10}},
   }});
 
-  // Rodapé
-  const pageCount=doc.internal.getNumberOfPages();
-  for(let i=1;i<=pageCount;i++){{
-    doc.setPage(i);
-    doc.setFontSize(7);doc.setTextColor(150);
-    doc.text(`Página ${{i}} de ${{pageCount}}`,287,205,{{align:'right'}});
-    doc.text('MG Contécnica · Relatório Confidencial',10,205);
-  }}
+  _rodapePDF(doc);
 
   const nomeArq=`relatorio_baixas_${{depAtual.replace(/\s+/g,'_')}}_${{periodo}}_${{hoje.toISOString().slice(0,10)}}.pdf`;
+  doc.save(nomeArq);
+}}
+
+function _cabecalhoPDF(doc, periodoLabel, dataLabel){{
+  doc.setFillColor(227,30,36);
+  doc.rect(0,0,297,18,'F');
+  doc.setTextColor(255,255,255);
+  doc.setFontSize(13); doc.setFont('helvetica','bold');
+  doc.text('MG Contécnica · Relatório de Baixas', 10, 12);
+  doc.setFontSize(9); doc.setFont('helvetica','normal');
+  doc.text(`${{labelFilial(filialAtual)}} · ${{depAtual}} · ${{periodoLabel}} · Gerado em ${{dataLabel}}`, 10, 17);
+}}
+
+function _rodapePDF(doc){{
+  const pageCount = doc.internal.getNumberOfPages();
+  for(let i=1; i<=pageCount; i++){{
+    doc.setPage(i);
+    doc.setFontSize(7); doc.setTextColor(150);
+    doc.text(`Página ${{i}} de ${{pageCount}}`, 287, 205, {{align:'right'}});
+    doc.text('MG Contécnica · Relatório Confidencial', 10, 205);
+  }}
+}}
+
+function _semanaDoMes(d){{
+  return Math.min(4, Math.ceil(d.getDate() / 7));
+}}
+
+function _construirPDFMesSemanas(rows, hoje){{
+  const {{ jsPDF }} = window.jspdf;
+  const doc = new jsPDF({{orientation:'landscape', unit:'mm', format:'a4'}});
+  const mesLabel = hoje.toLocaleDateString('pt-BR', {{month:'long', year:'numeric'}});
+  const dataLabel = hoje.toLocaleDateString('pt-BR');
+  const periodoLabel = `Mês por Semanas · ${{mesLabel}}`;
+
+  // Injeta dados de hoje vindos dos placares em tempo real
+  const hojeStr = hoje.toISOString().slice(0, 10);
+  const placarDia = (PLACARES.dia || {{}}).por_resp || [];
+  const extraRows = placarDia
+    .filter(r => r.unidade === filialAtual && r.dep === depAtual)
+    .map(r => ({{Data: hojeStr, Funcionario: r.resp||'—', Coordenador: r.coord||'—', BaixasDia: r.n||0}}));
+
+  const allRows = [...rows, ...extraRows];
+
+  // Coleta todos os funcionários
+  const funcsSet = new Set();
+  allRows.forEach(r => funcsSet.add(r.Funcionario||'—'));
+  const funcs = [...funcsSet].sort();
+
+  // Agrupa por semana-do-mês e dia
+  const semDays = {{1:{{}}, 2:{{}}, 3:{{}}, 4:{{}}}};
+  const semFuncs = {{1:{{}}, 2:{{}}, 3:{{}}, 4:{{}}}};
+
+  allRows.forEach(r => {{
+    const d = r.Data||'';
+    if(!d) return;
+    const dt = new Date(d+'T12:00:00');
+    const sem = _semanaDoMes(dt);
+    const resp = r.Funcionario||'—';
+    const val = Number(r.BaixasDia)||0;
+    if(!semDays[sem][d]) semDays[sem][d]={{}};
+    semDays[sem][d][resp] = Math.max(semDays[sem][d][resp]||0, val);
+    if(!semFuncs[sem][resp]) semFuncs[sem][resp]={{coord: r.Coordenador||'—', total:0}};
+  }});
+
+  // Calcula totais semanais por funcionário
+  [1,2,3,4].forEach(sem => {{
+    funcs.forEach(f => {{
+      if(!semFuncs[sem][f]) semFuncs[sem][f]={{coord:'—', total:0}};
+      semFuncs[sem][f].total = Object.keys(semDays[sem])
+        .reduce((a,d) => a+(semDays[sem][d][f]||0), 0);
+    }});
+  }});
+
+  // ── Página 1: tabela geral ────────────────────────────────────────────────
+  _cabecalhoPDF(doc, periodoLabel, dataLabel);
+
+  const headGeral = [['Funcionário','Coordenador','Semana 1','Semana 2','Semana 3','Semana 4','Total Mês']];
+  const bodyGeral = funcs.map(f => {{
+    const s1=semFuncs[1][f]?.total||0, s2=semFuncs[2][f]?.total||0,
+          s3=semFuncs[3][f]?.total||0, s4=semFuncs[4][f]?.total||0;
+    const coord = semFuncs[1][f]?.coord||semFuncs[2][f]?.coord||semFuncs[3][f]?.coord||semFuncs[4][f]?.coord||'—';
+    return [f, coord, s1||'—', s2||'—', s3||'—', s4||'—', (s1+s2+s3+s4)||'—'];
+  }});
+  bodyGeral.push(['TOTAL','',
+    String(funcs.reduce((a,f)=>a+(semFuncs[1][f]?.total||0),0)),
+    String(funcs.reduce((a,f)=>a+(semFuncs[2][f]?.total||0),0)),
+    String(funcs.reduce((a,f)=>a+(semFuncs[3][f]?.total||0),0)),
+    String(funcs.reduce((a,f)=>a+(semFuncs[4][f]?.total||0),0)),
+    String(funcs.reduce((a,f)=>{{
+      return a+(semFuncs[1][f]?.total||0)+(semFuncs[2][f]?.total||0)
+              +(semFuncs[3][f]?.total||0)+(semFuncs[4][f]?.total||0);
+    }},0)),
+  ]);
+
+  doc.autoTable({{
+    head: headGeral, body: bodyGeral,
+    startY: 24,
+    styles:{{fontSize:9,cellPadding:2.5,halign:'center',textColor:[30,30,30]}},
+    headStyles:{{fillColor:[227,30,36],textColor:255,fontStyle:'bold'}},
+    columnStyles:{{0:{{halign:'left',fontStyle:'bold',cellWidth:45}},1:{{halign:'left',cellWidth:35}}}},
+    alternateRowStyles:{{fillColor:[245,245,245]}},
+    didParseCell: function(data){{
+      if(data.row.index===bodyGeral.length-1){{
+        data.cell.styles.fillColor=[227,30,36];
+        data.cell.styles.textColor=255;
+        data.cell.styles.fontStyle='bold';
+      }}
+    }},
+    margin:{{left:10,right:10}},
+  }});
+
+  // ── Páginas 2-5: uma por semana ───────────────────────────────────────────
+  [1,2,3,4].forEach(sem => {{
+    const days = Object.keys(semDays[sem]).sort();
+    if(!days.length) return;
+
+    doc.addPage();
+    _cabecalhoPDF(doc, `${{periodoLabel}} · Semana ${{sem}}`, dataLabel);
+
+    const colsDia = days.map(d => {{
+      const dt = new Date(d+'T12:00:00');
+      return {{data:d, label:dt.toLocaleDateString('pt-BR',{{weekday:'short',day:'2-digit',month:'2-digit'}})}};
+    }});
+
+    const headSem = [['Funcionário','Coordenador',...colsDia.map(c=>c.label),'Total Semana']];
+    const bodySem = funcs.map(f => {{
+      const dvals = colsDia.map(c => {{
+        const v = semDays[sem][c.data]?.[f];
+        return v ? String(v) : '—';
+      }});
+      const total = colsDia.reduce((a,c)=>a+(semDays[sem][c.data]?.[f]||0),0);
+      return [f, semFuncs[sem][f]?.coord||'—', ...dvals, total||'—'];
+    }});
+    const totalSem = ['TOTAL',''];
+    colsDia.forEach(c => totalSem.push(String(funcs.reduce((a,f)=>a+(semDays[sem][c.data]?.[f]||0),0))));
+    totalSem.push(String(funcs.reduce((a,f)=>a+(semFuncs[sem][f]?.total||0),0)));
+    bodySem.push(totalSem);
+
+    doc.autoTable({{
+      head: headSem, body: bodySem,
+      startY: 24,
+      styles:{{fontSize:8,cellPadding:2,halign:'center',textColor:[30,30,30]}},
+      headStyles:{{fillColor:[227,30,36],textColor:255,fontStyle:'bold',fontSize:8}},
+      columnStyles:{{0:{{halign:'left',fontStyle:'bold',cellWidth:38}},1:{{halign:'left',cellWidth:28}}}},
+      alternateRowStyles:{{fillColor:[245,245,245]}},
+      didParseCell: function(data){{
+        if(data.row.index===bodySem.length-1){{
+          data.cell.styles.fillColor=[227,30,36];
+          data.cell.styles.textColor=255;
+          data.cell.styles.fontStyle='bold';
+        }}
+      }},
+      margin:{{left:10,right:10}},
+    }});
+  }});
+
+  _rodapePDF(doc);
+
+  const nomeArq=`relatorio_baixas_${{depAtual.replace(/\s+/g,'_')}}_mes_semanas_${{hoje.toISOString().slice(0,10)}}.pdf`;
   doc.save(nomeArq);
 }}
 

@@ -12,6 +12,7 @@ import time
 import subprocess
 
 from datetime import datetime
+import re
 
 # ============================================================
 # GARANTIR DEPENDÊNCIAS
@@ -392,15 +393,121 @@ def preencher_e_extrair(driver, filiais_para_selecionar, data_str, pasta_downloa
     return aguardar_download(pasta_download, antes, progress, task)
 
 # ============================================================
+# ORGANIZAR POR SEMANA
+# ============================================================
+
+def pasta_da_semana(data_ref: datetime, pasta_base: str) -> str:
+    """
+    Retorna o caminho da pasta no formato:
+    PASTA_BASE/2026-06 Semana 1/
+    """
+    ano  = data_ref.year
+    mes  = data_ref.month
+    dia  = data_ref.day
+
+    # Número da semana dentro do mês (1 a 5)
+    semana_no_mes = (dia - 1) // 7 + 1
+
+    nome_mes = data_ref.strftime("%Y-%m")
+    nome_pasta = f"{nome_mes} Semana {semana_no_mes}"
+    return os.path.join(pasta_base, nome_pasta)
+
+# ============================================================
 # RENOMEAR ARQUIVO
 # ============================================================
 
 def renomear_arquivo(caminho_original, label_filial, pasta_download):
     timestamp    = datetime.now().strftime("%d-%m-%y %H%M")
     novo_nome    = f"{label_filial} - Relatorio de Pendencias - {timestamp}.xlsx"
-    novo_caminho = os.path.join(pasta_download, novo_nome)
+
+    # Se for "Todas", organiza na subpasta da semana
+    if label_filial == "Todas":
+        pasta_destino = pasta_da_semana(datetime.now(), pasta_download)
+        os.makedirs(pasta_destino, exist_ok=True)
+    else:
+        pasta_destino = pasta_download
+
+    novo_caminho = os.path.join(pasta_destino, novo_nome)
     os.rename(caminho_original, novo_caminho)
-    return novo_caminho, novo_nome
+    return novo_caminho, novo_nome, pasta_destino
+
+# ============================================================
+# MIGRAR ARQUIVOS EXISTENTES PARA PASTAS DE SEMANA
+# ============================================================
+
+def migrar_arquivos_existentes():
+    """
+    Organiza os .xlsx que estão soltos na pasta data/
+    para as subpastas de semana correspondentes.
+    Ignora subpastas já existentes (coordenadores, historico, semanas).
+    """
+    pastas_ignorar = {"coordenadores", "historico"}
+
+    arquivos = [
+        f for f in os.listdir(PASTA_REPO_DATA)
+        if f.lower().endswith(".xlsx")
+        and os.path.isfile(os.path.join(PASTA_REPO_DATA, f))
+    ]
+
+    if not arquivos:
+        return 0
+
+    movidos = 0
+    console.print()
+    console.rule("[bold yellow]Migração de arquivos existentes[/bold yellow]")
+    console.print()
+
+    for nome in arquivos:
+        caminho = os.path.join(PASTA_REPO_DATA, nome)
+
+        # Tenta extrair a data do nome do arquivo
+        padroes = [
+            r'(\d{2})-(\d{2})-(\d{2})\s(\d{4})',  # DD-MM-YY HHMM
+            r'(\d{2})-(\d{2})-(\d{2})_(\d{4})',   # DD-MM-YY_HHMM
+            r'(\d{2})-(\d{2})-(\d{4})\s(\d{4})',  # DD-MM-YYYY HHMM
+            r'(\d{2})-(\d{2})-(\d{4})_(\d{4})',   # DD-MM-YYYY_HHMM
+        ]
+
+        data_arquivo = None
+        for p in padroes:
+            m = re.search(p, nome)
+            if m:
+                g = m.groups()
+                try:
+                    if len(g[2]) == 2:
+                        data_arquivo = datetime(
+                            2000 + int(g[2]), int(g[1]), int(g[0]),
+                            int(g[3][:2]), int(g[3][2:])
+                        )
+                    else:
+                        data_arquivo = datetime(
+                            int(g[2]), int(g[1]), int(g[0]),
+                            int(g[3][:2]), int(g[3][2:])
+                        )
+                    break
+                except ValueError:
+                    continue
+
+        # Se não achou data no nome, usa a data de modificação do arquivo
+        if not data_arquivo:
+            data_arquivo = datetime.fromtimestamp(os.path.getmtime(caminho))
+
+        # Calcula a pasta de destino
+        pasta_destino = pasta_da_semana(data_arquivo, PASTA_REPO_DATA)
+        os.makedirs(pasta_destino, exist_ok=True)
+
+        destino_final = os.path.join(pasta_destino, nome)
+        os.rename(caminho, destino_final)
+
+        semana_label = os.path.basename(pasta_destino)
+        console.print(f"  [green]✔[/green] [dim]{nome}[/dim] → [cyan]{semana_label}[/cyan]")
+        movidos += 1
+
+    if movidos:
+        console.print()
+        console.print(f"  [bold green]{movidos} arquivo(s) organizado(s) com sucesso![/bold green]")
+
+    return movidos
 
 # ============================================================
 # EXECUÇÃO
@@ -420,6 +527,9 @@ def executar():
         border_style="cyan",
         padding=(1, 6),
     ))
+
+    # Migra arquivos soltos para pastas de semana
+    migrar_arquivos_existentes()
 
     resultado_filial = perguntar_filial()
     data_str = perguntar_data()
@@ -466,7 +576,7 @@ def executar():
 
             if arquivo_bruto:
                 progress.update(task, description="[cyan]Renomeando arquivo...")
-                _, novo_nome = renomear_arquivo(arquivo_bruto, label_filial, pasta_download)
+                _, novo_nome, pasta_download = renomear_arquivo(arquivo_bruto, label_filial, pasta_download)
 
         except Exception as erro:
             progress.stop()
