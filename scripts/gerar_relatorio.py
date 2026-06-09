@@ -1308,17 +1308,29 @@ function _construirPDF(rows, periodo, hoje){{
       Object.values(weekData).flatMap(d=>Object.keys(d).map(Number))
     )].sort((a,b)=>a-b);
     const funcs = Object.keys(totais).sort();
-    head = [['Funcionário','Coordenador',...allSems.map(s=>`Semana ${{s}}`),'Total Mês']];
+
+    // Calcula "Anterior": BaixasMes - soma de todas as semanas visíveis.
+    // Captura baixas anteriores ao primeiro registro do histórico deste mês.
+    const anterior = {{}};
+    funcs.forEach(f=>{{
+      const somaSemsF = allSems.reduce((a,s)=>a+((weekData[f]?.[s]?.maxBS)||0),0);
+      const v = (totais[f].mes||0) - somaSemsF;
+      anterior[f] = v > 0 ? v : 0;
+    }});
+    const totalAnterior = funcs.reduce((a,f)=>a+(anterior[f]||0),0);
+
+    head = [['Funcionário','Coordenador','Anterior',...allSems.map(s=>`Semana ${{s}}`),'Total Mês']];
     body = funcs.map(f=>{{
       const t=totais[f];
       const wd=weekData[f]||{{}};
+      const antVal = anterior[f]>0 ? String(anterior[f]) : '—';
       const vals=allSems.map(s=>{{
         const v=wd[s]?.maxBS;
         return (v!=null&&v>0)?String(v):'—';
       }});
-      return [f, t.coord, ...vals, String(t.mes)];
+      return [f, t.coord, antVal, ...vals, String(t.mes)];
     }});
-    const totalRow=['TOTAL',''];
+    const totalRow=['TOTAL','', totalAnterior>0?String(totalAnterior):'—'];
     allSems.forEach(s=>totalRow.push(String(funcs.reduce((a,f)=>a+((weekData[f]?.[s]?.maxBS)||0),0))));
     totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
     body.push(totalRow);
