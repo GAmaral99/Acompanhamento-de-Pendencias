@@ -13,6 +13,7 @@ import subprocess
 
 from datetime import datetime
 import re
+import argparse
 
 # ============================================================
 # GARANTIR DEPENDÊNCIAS
@@ -513,7 +514,7 @@ def migrar_arquivos_existentes():
 # EXECUÇÃO
 # ============================================================
 
-def executar():
+def executar(auto=False):
 
     console.print()
     console.print(Panel(
@@ -531,8 +532,16 @@ def executar():
     # Migra arquivos soltos para pastas de semana
     migrar_arquivos_existentes()
 
-    resultado_filial = perguntar_filial()
-    data_str = perguntar_data()
+    if auto:
+        resultado_filial = (OPCAO_TODAS, None, "Todas")
+        data_str = ultimo_dia_mes()
+        console.print(
+            f"  [dim][--auto] Filial: [bold magenta]Todas[/bold magenta] | "
+            f"Data: [bold cyan]{data_str}[/bold cyan][/dim]"
+        )
+    else:
+        resultado_filial = perguntar_filial()
+        data_str = perguntar_data()
 
     # Define quais textos de filial serão selecionados e o label do arquivo
     if resultado_filial[0] == OPCAO_TODAS:
@@ -674,4 +683,13 @@ def executar():
 # ============================================================
 
 if __name__ == "__main__":
-    executar()
+    parser = argparse.ArgumentParser(
+        description="Extrator de Relatório de Pendências MG Contécnica"
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Execução automática: seleciona Todas as Filiais e usa a data padrão (último dia do mês) sem prompts.",
+    )
+    args = parser.parse_args()
+    executar(auto=args.auto)

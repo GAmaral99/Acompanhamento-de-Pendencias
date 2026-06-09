@@ -608,8 +608,6 @@ body.light .results-header{{background:linear-gradient(135deg,#fde8e9 0%,#f5f5f5
     <div class="placares-section" id="placares-section" style="display:none">
       <div class="placares-title">Placar de Baixas</div>
       <div class="placares-export-row">
-        <button class="placar-export-btn" onclick="exportarPlacares('geral')">⬇ Baixar imagem geral</button>
-        <button class="placar-export-btn" onclick="exportarPlacares('dep')">⬇ Baixar por departamento</button>
         <button class="placar-export-btn" onclick="abrirModalPDF()" style="border-color:var(--red);color:var(--red)">📄 Relatório PDF</button>
       </div>
 
