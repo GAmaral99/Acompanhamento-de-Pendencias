@@ -90,7 +90,11 @@ def main():
         print(f"[!] Pasta '{DATA_DIR}' não encontrada.")
         sys.exit(1)
 
-    arquivos = list(DATA_DIR.glob("*.xlsx"))
+    arquivos = [
+        p for p in DATA_DIR.glob("**/*.xlsx")
+        if "coordenadores" not in p.parts
+        and "historico" not in p.parts
+    ]
     if not arquivos:
         print(f"[!] Nenhum .xlsx encontrado em '{DATA_DIR}'.")
         sys.exit(1)
