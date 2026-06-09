@@ -1309,8 +1309,9 @@ function _construirPDF(rows, periodo, hoje){{
     )].sort((a,b)=>a-b);
     const funcs = Object.keys(totais).sort();
 
-    // Calcula "Anterior": BaixasMes - soma de todas as semanas visíveis.
+    // Coluna "01/MM": BaixasMes - soma de todas as semanas visíveis.
     // Captura baixas anteriores ao primeiro registro do histórico deste mês.
+    const labelAnterior = `01/${{String(hoje.getMonth()+1).padStart(2,'0')}}`;
     const anterior = {{}};
     funcs.forEach(f=>{{
       const somaSemsF = allSems.reduce((a,s)=>a+((weekData[f]?.[s]?.maxBS)||0),0);
@@ -1319,7 +1320,7 @@ function _construirPDF(rows, periodo, hoje){{
     }});
     const totalAnterior = funcs.reduce((a,f)=>a+(anterior[f]||0),0);
 
-    head = [['Funcionário','Coordenador','Anterior',...allSems.map(s=>`Semana ${{s}}`),'Total Mês']];
+    head = [['Funcionário','Coordenador',labelAnterior,...allSems.map(s=>`Semana ${{s}}`),'Total Mês']];
     body = funcs.map(f=>{{
       const t=totais[f];
       const wd=weekData[f]||{{}};

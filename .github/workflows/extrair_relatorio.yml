@@ -1,0 +1,55 @@
+name: Extrair Relatório Automático
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # 08h Brasília
+    - cron: '0 15 * * *'   # 12h Brasília
+    - cron: '0 19 * * *'   # 16h Brasília
+    - cron: '0 21 * * *'   # 18h Brasília
+    - cron: '0 23 * * *'   # 20h Brasília
+  workflow_dispatch:        # permite rodar manualmente
+
+permissions:
+  contents: write
+
+jobs:
+  extrair:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Instalar Chrome
+        run: |
+          wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | sudo apt-key add -
+          echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" | sudo tee /etc/apt/sources.list.d/google-chrome.list
+          sudo apt-get update -q
+          sudo apt-get install -y google-chrome-stable
+
+      - name: Instalar dependências Python
+        run: |
+          pip install selenium webdriver-manager rich pandas openpyxl
+
+      - name: Extrair relatório
+        env:
+          MG_USUARIO: ${{ secrets.MG_USUARIO }}
+          MG_SENHA: ${{ secrets.MG_SENHA }}
+        run: |
+          python tools/mg_extrator_auto.py
+
+      - name: Commitar arquivo extraído
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/
+          git diff --staged --quiet || git commit -m "auto: extração automática $(date +'%d/%m/%Y %H:%M') BRT"
+          git pull --rebase origin main
+          git push
