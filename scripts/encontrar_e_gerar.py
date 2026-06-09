@@ -34,9 +34,11 @@ def segunda_da_semana(d: date) -> date:
 
 def extrair_dt_do_nome(nome: str) -> datetime | None:
     padroes = [
-        r'(\d{2})-(\d{2})-(\d{2})_(\d{4})',   # DD-MM-YY_HHMM
+         r'(\d{2})-(\d{2})-(\d{2})_(\d{4})',   # DD-MM-YY_HHMM
         r'(\d{4})-(\d{2})-(\d{2})_(\d{4})',   # YYYY-MM-DD_HHMM
         r'(\d{2})-(\d{2})-(\d{4})_(\d{4})',   # DD-MM-YYYY_HHMM
+        r'(\d{2})-(\d{2})-(\d{2})\s(\d{4})',  # DD-MM-YY HHMM ← espaço
+        r'(\d{4})-(\d{2})-(\d{2})\s(\d{4})',  # YYYY-MM-DD HHMM ← espaço
         r'(\d{2})-(\d{2})-(\d{2})',            # DD-MM-YY
         r'(\d{4})-(\d{2})-(\d{2})',            # YYYY-MM-DD
     ]
@@ -177,7 +179,7 @@ def main():
                 cmd_hist = [
                     sys.executable, str(HISTORICO),
                     "--placares-json", placares_json,
-                    "--data-ref", date.today().isoformat(),
+                    "--data-ref", d_atual.isoformat(),
                 ]
 
                 print(f"[*] Executando historico.py para {d_atual}\n")
