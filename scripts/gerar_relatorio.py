@@ -1263,12 +1263,14 @@ async function _construirPDF(rows, periodo, hoje){{
   const periodoLabel = periodo==='sem' ? 'Semana Atual' : 'Mês Atual';
   const dataLabel = hoje.toLocaleDateString('pt-BR');
 
+  _cabecalhoPDF(doc, periodoLabel, dataLabel);
+
   const totais = {{}};
   const hojeStr = hoje.toISOString().slice(0,10);
   let head, body;
+  let funcs = [];
 
   if(periodo === 'mes'){{
-    _cabecalhoPDF(doc, 'Análise Visual — Mês Atual', dataLabel);
     // weekData[resp][sem] = {{maxBS: max(BaixasSemana), coord}}
     // Para semanas concluídas, max(BaixasSemana) = total da semana (acumula até o último dia).
     // Para a semana atual, max(BaixasSemana) = acumulado até hoje.
@@ -1305,7 +1307,7 @@ async function _construirPDF(rows, periodo, hoje){{
     const allSems=[...new Set(
       Object.values(weekData).flatMap(d=>Object.keys(d).map(Number))
     )].sort((a,b)=>a-b);
-    const funcs = Object.keys(totais).sort();
+    funcs = Object.keys(totais).sort();
 
     // Coluna "01/MM": BaixasMes - soma de todas as semanas visíveis.
     // Captura baixas anteriores ao primeiro registro do histórico deste mês.
@@ -1334,100 +1336,7 @@ async function _construirPDF(rows, periodo, hoje){{
     totalRow.push(String(funcs.reduce((a,f)=>a+(totais[f].mes||0),0)));
     body.push(totalRow);
 
-    // ── Página de gráficos ──────────────────────────────────────────────────
-    await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js');
-    const _renderChart = async (cfg, cw, ch) => {{
-      const cv = document.createElement('canvas');
-      cv.width = cw; cv.height = ch;
-      Object.assign(cv.style, {{position:'absolute',left:'-9999px',top:'-9999px'}});
-      document.body.appendChild(cv);
-      const chObj = new Chart(cv, cfg);
-      await new Promise(r => setTimeout(r, 300));
-      const imgData = cv.toDataURL('image/png');
-      chObj.destroy(); document.body.removeChild(cv);
-      return imgData;
-    }};
-
-    // Gráfico 1: Top 10 funcionários — barras horizontais
-    const top10 = funcs.slice().sort((a,b)=>(totais[b].mes||0)-(totais[a].mes||0)).slice(0,10);
-    const img1 = await _renderChart({{
-      type:'bar',
-      data:{{
-        labels:top10.map(f=>f.length>18?f.slice(0,16)+'…':f),
-        datasets:[{{data:top10.map(f=>totais[f].mes||0),backgroundColor:'#E31E24',borderColor:'#E31E24',borderWidth:1}}],
-      }},
-      options:{{
-        indexAxis:'y',responsive:false,animation:false,
-        plugins:{{
-          legend:{{display:false}},
-          title:{{display:true,text:'Ranking de Baixas — Mês',color:'#1a1a1a',font:{{size:14,weight:'bold'}}}},
-        }},
-        scales:{{x:{{beginAtZero:true,ticks:{{color:'#333'}},grid:{{color:'#eee'}}}},y:{{ticks:{{color:'#333'}}}}}},
-      }},
-    }}, 520, 950);
-    doc.addImage(img1,'PNG',10,22,89,170);
-
-    // Gráfico 2: Evolução por semana — linha
-    const semLbls=[],semVls=[];
-    if(totalAnterior>0){{semLbls.push(labelAnterior);semVls.push(totalAnterior);}}
-    allSems.forEach(s=>{{
-      semLbls.push(`Semana ${{s}}`);
-      semVls.push(funcs.reduce((a,f)=>a+((weekData[f]?.[s]?.maxBS)||0),0));
-    }});
-    const img2 = await _renderChart({{
-      type:'line',
-      data:{{
-        labels:semLbls,
-        datasets:[{{
-          data:semVls,
-          borderColor:'#E31E24',backgroundColor:'rgba(227,30,36,0.15)',
-          fill:true,tension:0.3,pointBackgroundColor:'#E31E24',pointRadius:5,
-        }}],
-      }},
-      options:{{
-        responsive:false,animation:false,
-        plugins:{{
-          legend:{{display:false}},
-          title:{{display:true,text:'Evolução por Semana',color:'#1a1a1a',font:{{size:14,weight:'bold'}}}},
-        }},
-        scales:{{
-          y:{{beginAtZero:true,ticks:{{color:'#333'}},grid:{{color:'#eee'}}}},
-          x:{{ticks:{{color:'#333'}}}},
-        }},
-      }},
-    }}, 520, 950);
-    doc.addImage(img2,'PNG',104,22,89,170);
-
-    // Gráfico 3: Distribuição por coordenador — pizza
-    const byCoord={{}};
-    funcs.forEach(f=>{{
-      const c=totais[f].coord||'—';
-      byCoord[c]=(byCoord[c]||0)+(totais[f].mes||0);
-    }});
-    const cLbls=Object.keys(byCoord),cVls=cLbls.map(c=>byCoord[c]);
-    const PIE_PALETTE=['#E31E24','#2196F3','#4CAF50','#FF9800','#9C27B0','#00BCD4','#FF5722','#795548','#607D8B','#F44336'];
-    const img3 = await _renderChart({{
-      type:'pie',
-      data:{{
-        labels:cLbls.map(l=>l.length>16?l.slice(0,14)+'…':l),
-        datasets:[{{data:cVls,backgroundColor:cLbls.map((_,i)=>PIE_PALETTE[i%PIE_PALETTE.length])}}],
-      }},
-      options:{{
-        responsive:false,animation:false,
-        plugins:{{
-          legend:{{position:'bottom',labels:{{color:'#333',font:{{size:10}},boxWidth:12}}}},
-          title:{{display:true,text:'Distribuição por Coordenador',color:'#1a1a1a',font:{{size:14,weight:'bold'}}}},
-        }},
-      }},
-    }}, 520, 950);
-    doc.addImage(img3,'PNG',198,22,89,170);
-
-    // Página da tabela mensal
-    doc.addPage();
-    _cabecalhoPDF(doc, periodoLabel, dataLabel);
-
   }}else{{
-    _cabecalhoPDF(doc, periodoLabel, dataLabel);
     // periodo === 'sem': dias individuais
     const porDia = {{}};
     rows.forEach(r=>{{
@@ -1505,6 +1414,45 @@ async function _construirPDF(rows, periodo, hoje){{
   }});
 
   _rodapePDF(doc);
+
+  if(periodo === 'mes' && funcs.length){{
+    doc.addPage();
+    _cabecalhoPDF(doc, 'Baixas por Funcionário — Mês', dataLabel);
+    await _loadScript('https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js');
+    const cv = document.createElement('canvas');
+    cv.width = 1600; cv.height = 750;
+    Object.assign(cv.style, {{position:'absolute',left:'-9999px',top:'-9999px'}});
+    document.body.appendChild(cv);
+    const sortedFuncs = funcs.slice().sort((a,b)=>(totais[b].mes||0)-(totais[a].mes||0));
+    const chObj = new Chart(cv, {{
+      type:'bar',
+      data:{{
+        labels:sortedFuncs.map(f=>f.length>18?f.slice(0,16)+'…':f),
+        datasets:[{{
+          label:'Baixas no Mês',
+          data:sortedFuncs.map(f=>totais[f].mes||0),
+          backgroundColor:'#E31E24',
+          borderColor:'#c01a1f',
+          borderWidth:1,
+        }}],
+      }},
+      options:{{
+        responsive:false,animation:false,
+        plugins:{{
+          legend:{{display:false}},
+          title:{{display:false}},
+        }},
+        scales:{{
+          y:{{beginAtZero:true,ticks:{{color:'#333',font:{{size:11}}}},grid:{{color:'#eee'}}}},
+          x:{{ticks:{{color:'#333',font:{{size:11}},maxRotation:45,minRotation:30}}}},
+        }},
+      }},
+    }});
+    await new Promise(r => setTimeout(r, 300));
+    const imgData = cv.toDataURL('image/png');
+    chObj.destroy(); document.body.removeChild(cv);
+    doc.addImage(imgData,'PNG',10,22,277,163);
+  }}
 
   const nomeArq=`relatorio_baixas_${{depAtual.replace(/\s+/g,'_')}}_${{periodo}}_${{hoje.toISOString().slice(0,10)}}.pdf`;
   doc.save(nomeArq);
