@@ -263,3 +263,13 @@ body.light .results-header{background:linear-gradient(135deg,#fde8e9 0%,#f5f5f5 
   box-shadow:0 2px 10px rgba(0,0,0,.25);transition:all .2s;
 }
 #theme-toggle:hover{border-color:var(--red);box-shadow:0 4px 16px var(--red-glow);transform:scale(1.08)}
+#btn-central{
+  position:fixed;top:18px;right:70px;z-index:9000;
+  background:var(--surface);border:1px solid var(--border);
+  color:var(--white);font-size:11px;font-weight:600;font-family:var(--font);
+  padding:0 14px;height:40px;border-radius:100px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  text-decoration:none;white-space:nowrap;
+  box-shadow:0 2px 10px rgba(0,0,0,.25);transition:all .2s;
+}
+#btn-central:hover{border-color:var(--red);box-shadow:0 4px 16px var(--red-glow);}

@@ -4,7 +4,7 @@
 
 $python = (Get-Command python).Source
 $script = "C:\Users\gamaral\Desktop\Python\repo\tools\mg_extrator.py"
-$horarios = @("08:40", "12:00", "15:00", "18:00")
+$horarios = @("08:40", "12:00", "15:00", "16:45", "17:45")
 
 Write-Host "Configurando tarefas agendadas..." -ForegroundColor Cyan
 
