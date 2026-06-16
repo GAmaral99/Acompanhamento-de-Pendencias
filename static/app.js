@@ -452,14 +452,9 @@ function _downloadCanvas(canvas,filename){
 // ── Tema claro/escuro ─────────────────────────────────────────────────────────
 function toggleTema(){
   const isLight = document.body.classList.toggle('light');
-  localStorage.setItem('tema-claro', isLight ? '1' : '0');
   document.getElementById('theme-toggle').textContent = isLight ? '☀️ Alterar Tema: Claro' : '🌙 Alterar Tema: Escuro';
 }
-(function(){
-  const isLight = localStorage.getItem('tema-claro') !== '0';
-  if(isLight) document.body.classList.add('light');
-  document.getElementById('theme-toggle').textContent = isLight ? '☀️ Alterar Tema: Claro' : '🌙 Alterar Tema: Escuro';
-})();
+document.getElementById('theme-toggle').textContent = '☀️ Alterar Tema: Claro';
 
 // ── PDF HISTÓRICO ─────────────────────────────────────────────────────────────
 
