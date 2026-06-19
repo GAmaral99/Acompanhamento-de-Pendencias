@@ -641,8 +641,8 @@ def executar(auto=False):
                     pg.update(t2, description="[cyan]Baixando atualizações remotas (pull)...")
                     subprocess.run(["git", "-C", repo_dir, "pull", "--rebase", "--autostash"],
                                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    pg.update(t2, description="[cyan]Adicionando arquivo...")
-                    subprocess.run(["git", "-C", repo_dir, "add", "data/"], check=True,
+                    pg.update(t2, description="[cyan]Adicionando arquivos...")
+                    subprocess.run(["git", "-C", repo_dir, "add", "-A"], check=True,
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                     pg.update(t2, description="[cyan]Criando commit...")
                     msg = f"data: {novo_nome}"

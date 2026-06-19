@@ -304,8 +304,8 @@ sorted.forEach(r=>{
     const nb=g.novo?'<span class="cn-badge">CLIENTE NOVO</span>':'';
     html+=`<tr class="dep-row"><td colspan="6">${g.dep}${nb}</td></tr>`;
     g.rows.forEach(r=>{
-      const razaoShort=(r.razao||r.grupo||'—').substring(0,22)+(((r.razao||'').length>22)?'…':'');
-      const clientTag=`<span class="client-tag" title="${r.razao||''}"><span class="razao">${razaoShort}</span><span class="cod">#${r.cod}</span></span>`;
+      const razaoShort=(r.razao||r.grupo||'—').substring(0,34)+(((r.razao||'').length>34)?'…':'');
+      const clientTag=`<span class="client-tag client-tag--${aba}" title="${r.razao||''}"><span class="razao">${razaoShort}</span><span class="cod">#${r.cod}</span></span>`;
       let comtHtml='';
       if(r.dataComt)comtHtml+=`<div class="comt-date">📅 ${r.dataComt}</div>`;
       if(r.comt&&r.comt.trim()){
