@@ -1,6 +1,6 @@
 :root{
   --bg:#1a1a1a;--surface:#2c2c2c;--surface2:#333333;--border:#444444;
-  --red:#c0392b;--red-dim:rgba(192,57,43,0.15);--red-glow:rgba(192,57,43,.18);
+  --red:#f85149;--red-dim:rgba(248,81,73,0.15);--red-glow:rgba(248,81,73,.18);
   --white:#ffffff;--off-white:#f0f0f0;--muted:#aaaaaa;--muted2:#888888;
   --green:#22c97a;--amber:#f5a623;--blue:#4da6ff;
   --font:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;--mono:'Courier New',Consolas,monospace;
@@ -15,7 +15,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--white);min-height:
 
 /* ── LOGO BAR ── */
 .logo-bar{display:flex;align-items:center;gap:14px;padding:24px 48px 0}
-.logo-img{width:52px;height:52px;object-fit:contain;border-radius:50%;background:#fff;padding:4px}
+.logo-img{height:88px;width:auto;max-width:260px;object-fit:contain;display:block}
 .logo-text{font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
 .logo-text strong{color:var(--white);display:block;font-size:13px;letter-spacing:.06em}
 
@@ -34,7 +34,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--white);min-height:
 .filial-card:hover::after{transform:scaleX(1)}
 .fc-num{font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);font-family:var(--mono)}
 .fc-name{font-size:20px;font-weight:700;letter-spacing:-.01em}
-.fc-badge{font-size:11px;color:var(--red);font-family:var(--mono);margin-top:2px;display:flex;align-items:center;gap:5px}
+.fc-badge{font-size:14px;font-weight:700;color:var(--red);font-family:var(--mono);margin-top:2px;display:flex;align-items:center;gap:5px}
 .fc-badge::before{content:'';width:5px;height:5px;background:var(--red);border-radius:50%;display:inline-block}
 
 /* ── SCREEN 2 DEP ── */
@@ -217,7 +217,7 @@ tr.dep-row td{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;fo
 .bf-table tbody td:last-child{text-align:right}
 .bf-dep-row td{background:rgba(34,201,122,.05);color:var(--green);font-weight:700;font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:7px 14px;border-top:1px solid var(--border)}
 .bf-resp-name{font-size:12px;font-weight:600;color:var(--white)}
-.bf-coord-badge{font-size:10px;color:var(--blue);font-family:var(--mono);margin-left:8px}
+.bf-coord-badge{font-size:11px;font-weight:600;color:var(--white);font-family:var(--mono);margin-left:8px}
 .bf-num{font-size:14px;font-weight:700;color:var(--green);font-family:var(--mono)}
 .bf-bar-cell{width:120px}
 .bf-bar-bg{background:rgba(34,201,122,.1);border-radius:3px;height:6px;overflow:hidden}
@@ -259,7 +259,7 @@ tr.dep-row td{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;fo
 body.light{
   --bg:#f4f4f4;--surface:#ffffff;--surface2:#ebebeb;--border:#e0e0e0;
   --white:#2c2c2c;--off-white:#333333;--muted:#888888;--muted2:#999999;
-  --red:#c0392b;--red-dim:rgba(192,57,43,0.12);--red-glow:rgba(192,57,43,.12);
+  --red:#a8291d;--red-dim:rgba(168,41,29,0.12);--red-glow:rgba(168,41,29,.12);
   --green:#18a360;--amber:#c97d00;--blue:#1a6fbf;
 }
 body.light .filial-card{box-shadow:0 2px 8px rgba(0,0,0,.07)}
