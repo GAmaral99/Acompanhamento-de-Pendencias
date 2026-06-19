@@ -230,7 +230,7 @@ def gerar_html(arquivo_base, arquivo_atual, em_andamento, finalizadas, reabertas
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 <link rel="stylesheet" href="static/app.css">
 </head>
-<body>
+<body class="light">
 
 <button id="theme-toggle" onclick="toggleTema()" title="Alternar tema"></button>
 

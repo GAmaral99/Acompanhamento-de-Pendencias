@@ -454,7 +454,7 @@ function toggleTema(){
   const isLight = document.body.classList.toggle('light');
   document.getElementById('theme-toggle').textContent = isLight ? '☀️ Alterar Tema: Claro' : '🌙 Alterar Tema: Escuro';
 }
-document.getElementById('theme-toggle').textContent = '☀️ Alterar Tema: Claro';
+document.getElementById('theme-toggle').textContent = document.body.classList.contains('light') ? '☀️ Alterar Tema: Claro' : '🌙 Alterar Tema: Escuro';
 
 // ── PDF HISTÓRICO ─────────────────────────────────────────────────────────────
 
