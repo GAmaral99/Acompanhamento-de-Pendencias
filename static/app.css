@@ -156,7 +156,7 @@ tr.dep-row td{background:rgba(227,30,36,.06);color:var(--red);font-weight:700;fo
 .comt-date{font-size:11px;color:var(--amber);font-family:var(--mono);white-space:nowrap}
 .comt-btn{background:rgba(227,30,36,.1);border:1px solid rgba(227,30,36,.2);color:var(--red);font-size:11px;font-family:var(--font);padding:2px 9px;border-radius:14px;cursor:pointer;transition:background .15s;white-space:nowrap;margin-top:3px;display:inline-block;font-weight:600}
 .comt-btn:hover{background:rgba(227,30,36,.22)}
-.comt-full{display:none;margin-top:6px;font-size:11px;color:var(--muted);background:rgba(0,0,0,.35);border-left:2px solid var(--red);padding:8px 12px;border-radius:0 6px 6px 0;line-height:1.7;white-space:pre-wrap;font-family:var(--mono)}
+.comt-full{display:none;margin-top:6px;font-size:11px;color:var(--off-white);background:rgba(0,0,0,.35);border-left:2px solid var(--red);padding:8px 12px;border-radius:0 6px 6px 0;line-height:1.7;white-space:pre-wrap;font-family:var(--mono)}
 .comt-full.open{display:block}
 .no-data{color:var(--muted);font-size:13px;padding:24px 16px;text-align:center;font-style:italic}
 .resp-name{font-size:12px;font-weight:600}
@@ -265,6 +265,7 @@ body.light{
 body.light .filial-card{box-shadow:0 2px 8px rgba(0,0,0,.07)}
 body.light table{box-shadow:0 2px 8px rgba(0,0,0,.06)}
 body.light .results-header{background:linear-gradient(135deg,rgba(192,57,43,.06) 0%,#f4f4f4 60%)}
+body.light .comt-full{background:#f0f0f0;color:#333333;border-left:2px solid var(--red)}
 
 /* ── BOTÃO TEMA ── */
 #theme-toggle{
